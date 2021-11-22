@@ -1,60 +1,11 @@
 mod macros;
 use std::ops::RangeInclusive;
 
-pub struct RangeHeaderParserBuilder<'a> {
-    file_size: Option<u64>,
-    unit_label: Option<&'a str>,
-}
-
-impl<'a> RangeHeaderParserBuilder<'a> {
-    pub fn new() -> Self {
-        Self {
-            file_size: None,
-            unit_label: None,
-        }
-    }
-
-    pub fn with_file_size(self, file_size: u64) -> Self {
-        Self {
-            file_size: Some(file_size),
-            unit_label: self.unit_label,
-        }
-    }
-
-    pub fn with_unit_label(self, unit_label: &'a str) -> Self {
-        Self {
-            file_size: self.file_size,
-            unit_label: Some(unit_label),
-        }
-    }
-
-    pub fn build(self) -> RangeHeaderParser {
-        RangeHeaderParser {
-            file_size: self.file_size.unwrap_or(u64::MAX),
-            unit_sep: self.unit_label.map(|s| format!("{}=", s)).unwrap_or("bytes=".to_owned())
-        }
-    }
-
-
-}
-
-pub struct RangeHeaderParser {
-    file_size: u64,
-    unit_sep: String,
-}
-
-impl RangeHeaderParser {
-    pub fn parse(&self, range_header_value: &str) -> ParsedRangeHeader {
-        parse_range_header_value(range_header_value, self.file_size, &self.unit_sep)
-    }
-}
-
-
 /// Function that parses the content of a range-header
 /// If correctly formatted returns the requested ranges
 /// If syntactically correct but unsatisfiable due to file-constraints returns `Unsatisfiable`
 /// If un-parseable as a range returns `Malformed`
-fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: &str) -> ParsedRangeHeader {
+fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: &str) -> ParsedRanges {
     if !range_header_value.starts_with(unit_sep) {
         return malformed!(format!(
                     "Range: {} is not acceptable, does not start with {}",
@@ -75,14 +26,14 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
     if let Some((_, indicated_range)) = start {
         for range in indicated_range.split(", ") {
             if range.contains(' ') {
-                return malformed!(format!(
+                return invalid!(format!(
                     "Range: {} is not acceptable, contains whitespace in range part.",
                     range
                 ));
             }
             let sep_count = range.match_indices("-").count();
             if sep_count != 1 {
-                return malformed!(format!(
+                return invalid!(format!(
                     "Range: {} is not acceptable, contains multiple dashes (-).",
                     range
                 ));
@@ -90,20 +41,14 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
             if let Some((start, end)) = split_once(range, "-") {
                 if start == "" {
                     if let Some(end) = strict_parse_u64(end) {
-                        if end >= file_size {
-                            return unsatisfiable!(format!(
-                                "Range: {} is not satisfiable, end of range exceeds file boundary.",
-                                range
-                            ));
-                        }
                         if end == 0 {
-                            return unsatisfiable!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
+                            return invalid!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
                         }
                         let start = file_size - 1 - end;
                         ranges.push(RangeInclusive::new(start, file_size - 1));
                         continue;
                     }
-                    return malformed!(format!(
+                    return invalid!(format!(
                         "Range: {} is not acceptable, end of range not parseable.",
                         range
                     ));
@@ -115,7 +60,7 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
                     }
                     if let Some(end) = strict_parse_u64(end) {
                         if end >= file_size {
-                            return unsatisfiable!(format!(
+                            return invalid!(format!(
                                 "Range: {} is not satisfiable, end of range exceeds file boundary.",
                                 range
                             ));
@@ -123,45 +68,45 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
                         ranges.push(RangeInclusive::new(start, end));
                         continue;
                     }
-                    return malformed!(format!(
+                    return invalid!(format!(
                         "Range: {} is not acceptable, end of range not parseable.",
                         range
                     ));
                 }
-                return malformed!(format!(
+                return invalid!(format!(
                     "Range: {} is not acceptable, start of range not parseable.",
                     range
                 ));
             }
-            return malformed!(format!(
+            return invalid!(format!(
                 "Range: {} is not acceptable, range does not contain any dashes.",
                 range
             ));
         }
     } else {
-        return malformed!(format!(
+        return invalid!(format!(
             "Range: {} is not acceptable, range does not start with '{}='",
             range_header_value,
             unit_sep
         ));
     }
     if ranges.is_empty() {
-        return malformed!(format!(
+        return invalid!(format!(
             "Range: {} could not be parsed for an unknown reason, please file an issue",
             range_header_value
         ));
     } else {
         match validate_ranges(&ranges) {
             RangeValidationResult::Valid => ParsedRangeHeader::Range(ranges),
-            RangeValidationResult::Overlapping => unsatisfiable!(format!(
+            RangeValidationResult::Overlapping => invalid!(format!(
                 "Range header: {} is not satisfiable, ranges overlap",
                 range_header_value
             )),
-            RangeValidationResult::Reversed => unsatisfiable!(format!(
+            RangeValidationResult::Reversed => invalid!(format!(
                 "Range header: {} is not satisfiable, range reversed",
                 range_header_value
             )),
-            RangeValidationResult::Empty => unsatisfiable!(format!(
+            RangeValidationResult::Empty => invalid!(format!(
                 "Range header: {} is not satisfiable, range empty",
                 range_header_value
             ))
@@ -214,27 +159,70 @@ fn split_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
     Some((left, right))
 }
 
+pub struct ParsedRanges {
+    ranges: Vec<ParsedRange>,
+}
 
-#[derive(Debug, PartialEq)]
-#[cfg(feature = "debug")]
-pub enum ParsedRangeHeader {
-    Range(Vec<RangeInclusive<u64>>),
-    Unsatisfiable(String),
-    Malformed(String),
+impl ParsedRanges {
+    pub fn validate(&self, file_size_bytes: u64) -> Vec<ParsedRange> {
+        let mut validated = Vec::with_capacity(self.ranges.len());
+        for parsed in &self.ranges {
+            if let ParsedRange::Unvalidated(unvalidated) = parsed {
+                let end = match unvalidated.end_of_range {
+                    RangePosition::Index(i) => i,
+                    RangePosition::LastByte => file_size_bytes - 1,
+                };
+                if end < file_size_bytes {
+                    validated.push(ParsedRange::Validated(RangeInclusive::new(unvalidated.start, end)))
+                } else {
+                    validated.push(ParsedRange::Invalid("Range end exceedes EOF"))
+                }
+            } else {
+                validated.push(parsed)
+            }
+        }
+        validated
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ParsedRange {
+    Validated(RangeInclusive<u64>),
+    Unvalidated(UnvalidatedRange),
+    Invalid(String)
 }
 
 #[derive(Debug, PartialEq)]
 #[cfg(not(feature = "debug"))]
-pub enum ParsedRangeHeader {
-    Range(Vec<RangeInclusive<u64>>),
-    Unsatisfiable,
-    Malformed,
+pub enum ParsedRange {
+    Validated(RangeInclusive<u64>),
+    Unvalidated(UnvalidatedRange),
+    Invalid
 }
 
-impl ParsedRangeHeader {
-
+#[derive(Debug, Copy, Clone)]
+pub struct UnvalidatedRange {
+    start: RangePosition,
+    end_of_range: RangePosition,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum RangePosition {
+    Index(u64),
+    LastByte,
+    FromLast(u64),
+}
+
+impl RangePosition {
+
+    fn calculate_actual(&self, file_size_bytes: u64) -> u64 {
+        match self {
+            RangePosition::Index(i) => i,
+            RangePosition::LastByte => file_size_bytes - 1,
+            RangePosition::FromLast(i) => file_size_bytes - 1 - i
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
