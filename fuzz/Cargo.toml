@@ -1,0 +1,28 @@
+[package]
+name = "parse_range_headers-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+regex = "1.5.4"
+lazy_static = "1.4.0"
+headers = "0.3.5"
+
+[dependencies.parse_range_headers]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "random_string_input"
+path = "fuzz_targets/random_string_input.rs"
+test = false
+doc = false

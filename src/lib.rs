@@ -55,11 +55,31 @@ impl RangeHeaderParser {
 /// If syntactically correct but unsatisfiable due to file-constraints returns `Unsatisfiable`
 /// If un-parseable as a range returns `Malformed`
 fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: &str) -> ParsedRangeHeader {
+    if !range_header_value.starts_with(unit_sep) {
+        return malformed!(format!(
+                    "Range: {} is not acceptable, does not start with {}",
+                    range_header_value,
+                    unit_sep,
+                ));
+    }
+    let unit_sep_count = range_header_value.match_indices(unit_sep).count();
+    if unit_sep_count != 1 {
+        return malformed!(format!(
+                    "Range: {} is not acceptable, unit separator {} occurs more than once",
+                    range_header_value,
+                    unit_sep,
+                ));
+    }
     let start = split_once(range_header_value, unit_sep);
     let mut ranges = Vec::new();
     if let Some((_, indicated_range)) = start {
-        for range in indicated_range.split(",") {
-            let range = range.trim();
+        for range in indicated_range.split(", ") {
+            if range.contains(' ') {
+                return malformed!(format!(
+                    "Range: {} is not acceptable, contains whitespace in range part.",
+                    range
+                ));
+            }
             let sep_count = range.match_indices("-").count();
             if sep_count != 1 {
                 return malformed!(format!(
@@ -69,7 +89,7 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
             }
             if let Some((start, end)) = split_once(range, "-") {
                 if start == "" {
-                    if let Ok(end) = end.parse::<u64>() {
+                    if let Some(end) = strict_parse_u64(end) {
                         if end >= file_size {
                             return unsatisfiable!(format!(
                                 "Range: {} is not satisfiable, end of range exceeds file boundary.",
@@ -88,12 +108,12 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
                         range
                     ));
                 }
-                if let Ok(start) = start.parse::<u64>() {
+                if let Some(start) = strict_parse_u64(start) {
                     if end == "" {
                         ranges.push(RangeInclusive::new(start, file_size - 1));
                         continue;
                     }
-                    if let Ok(end) = end.parse::<u64>() {
+                    if let Some(end) = strict_parse_u64(end) {
                         if end >= file_size {
                             return unsatisfiable!(format!(
                                 "Range: {} is not satisfiable, end of range exceeds file boundary.",
@@ -120,45 +140,78 @@ fn parse_range_header_value(range_header_value: &str, file_size: u64, unit_sep: 
         }
     } else {
         return malformed!(format!(
-            "Range: {} is not acceptable, range does not start with 'bytes='",
-            range_header_value
+            "Range: {} is not acceptable, range does not start with '{}='",
+            range_header_value,
+            unit_sep
         ));
     }
     if ranges.is_empty() {
-        panic!("Programming error parsing range {}", range_header_value)
+        return malformed!(format!(
+            "Range: {} could not be parsed for an unknown reason, please file an issue",
+            range_header_value
+        ));
     } else {
-        if ranges.len() == 1 {
-            ParsedRangeHeader::Range(ranges)
-        } else if !overlaps(&ranges) {
-            ParsedRangeHeader::Range(ranges)
-        } else {
-            return unsatisfiable!(format!(
+        match validate_ranges(&ranges) {
+            RangeValidationResult::Valid => ParsedRangeHeader::Range(ranges),
+            RangeValidationResult::Overlapping => unsatisfiable!(format!(
                 "Range header: {} is not satisfiable, ranges overlap",
                 range_header_value
-            ));
+            )),
+            RangeValidationResult::Reversed => unsatisfiable!(format!(
+                "Range header: {} is not satisfiable, range reversed",
+                range_header_value
+            )),
+            RangeValidationResult::Empty => unsatisfiable!(format!(
+                "Range header: {} is not satisfiable, range empty",
+                range_header_value
+            ))
         }
+
     }
 }
 
-fn overlaps(ranges: &Vec<RangeInclusive<u64>>) -> bool {
+fn strict_parse_u64(s: &str) -> Option<u64> {
+    if !s.starts_with("+") && !s.starts_with("0") {
+        return s.parse().ok();
+    }
+    None
+}
+
+enum RangeValidationResult {
+    Valid,
+    Overlapping,
+    Empty,
+    Reversed,
+}
+
+fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
     let mut bounds = Vec::new();
     for range in ranges {
+        let start = range.start();
+        let end = range.end();
+        if start > end {
+            return RangeValidationResult::Reversed;
+        }
+        if start == end {
+            return RangeValidationResult::Empty;
+        }
         bounds.push((range.start(), range.end()));
     }
     for i in 0..bounds.len() {
         for j in i + 1..bounds.len() {
             if bounds[i].0 <= bounds[j].1 && bounds[j].0 <= bounds[i].1 {
-                return true;
+                return RangeValidationResult::Overlapping
             }
         }
     }
-    false
+    RangeValidationResult::Valid
 }
 
 fn split_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
     let mut iter = s.split(pat);
-    let left = iter.next();
-    left.and_then(|l| iter.next().map(|r| (l, r)))
+    let left = iter.next()?;
+    let right = iter.next()?;
+    Some((left, right))
 }
 
 
@@ -191,12 +244,18 @@ mod tests {
     const TEST_FILE_LENGTH: u64 = 10_000;
 
     #[test]
+    fn fuzz() {
+    }
+
+    #[test]
     fn parse_with_builder() {
-        let builder = RangeHeaderParserBuilder::new();
+        let parser = RangeHeaderParserBuilder::new()
+            .with_file_size(TEST_FILE_LENGTH)
+            .build();
         let input = "bytes=0-1023";
         assert_eq!(
             ParsedRangeHeader::Range(vec![RangeInclusive::new(0, 1023)]),
-            parse_range_header_value(input, TEST_FILE_LENGTH, "bytes=")
+            parser.parse(input)
         );
     }
 

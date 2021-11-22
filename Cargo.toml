@@ -8,3 +8,5 @@ edition = "2021"
 debug = []
 
 [dependencies]
+
+[dev-dependencies]
