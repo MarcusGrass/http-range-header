@@ -6,6 +6,7 @@ use regex::Regex;
 use std::io::Write;
 use std::fs::OpenOptions;
 use headers::{HeaderValue, Range};
+use headers::Header;
 use regex::internal::Input;
 
 lazy_static::lazy_static! {
@@ -14,14 +15,10 @@ lazy_static::lazy_static! {
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
-        /*
-        let header = HeaderValue::from_static(s);
-        let h = headers::Header::<Range>::decode(s);
-
-         */
         if STANDARD_RANGE.is_match(s) {
             return;
         }
+
         let parser = RangeHeaderParserBuilder::new()
             .with_unit_label("bytes")
             .build();
@@ -39,8 +36,28 @@ fuzz_target!(|data: &[u8]| {
         }
 
          */
+        if let Ok(header) = HeaderValue::from_str(s) {
+            if let Ok(h) = headers::Range::decode(&mut vec![header].iter()) {
+                let mut it = h.iter();
+                let mut res = "".to_owned();
+                for v in h.iter() {
+                    res = format!("{}, {:?}", res, v)
+                }
+                if res != "" {
+                let mut file = OpenOptions::new()
+                    .read(true)
+                    .append(true)
+                    .open("valid.txt")
+                    .unwrap();
+                    file.write(format!("{}: {}\n", s, res).as_bytes())
+                        .unwrap();
+                }
+
+                //assert!(n.is_none(), "Range was not rejected by headers, input=`{}` range={:?}", s, n);
+            }
+        }
+
         assert!(parsed == ParsedRangeHeader::Unsatisfiable || parsed == ParsedRangeHeader::Malformed, "Range was not rejected input=`{}` range={:?}", s, parsed);
-        // assert!(h.iter().is_empty(), "Range was not rejected by headers, input=`{}`");
         /*
         if s.starts_with("bytes=") {
             assert_eq!(parsed, ParsedRangeHeader::Unsatisfiable, "input = {} should be unsatisfiable", s)
