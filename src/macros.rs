@@ -2,7 +2,7 @@
 #[cfg(feature = "with_error_cause")]
 macro_rules! invalid {
     ($create:expr) => {
-        ParsedRange::Invalid($create)
+        Err(RangeMalformedError::new($create))
     };
 }
 
@@ -10,7 +10,7 @@ macro_rules! invalid {
 #[cfg(not(feature = "with_error_cause"))]
 macro_rules! invalid {
     ($create:expr) => {
-        ParsedRange::Invalid
+        Err(RangeMalformedError)
     };
 }
 
@@ -18,7 +18,7 @@ macro_rules! invalid {
 #[cfg(feature = "with_error_cause")]
 macro_rules! unsatisfiable {
     ($create:expr) => {
-        ValidatedRange::Unsatisfiable($create)
+        Err(RangeUnsatisfiableError::new($create))
     };
 }
 
@@ -26,6 +26,6 @@ macro_rules! unsatisfiable {
 #[cfg(not(feature = "with_error_cause"))]
 macro_rules! unsatisfiable {
     ($create:expr) => {
-        ValidatedRange::Unsatisfiable
+        Err(RangeUnsatisfiableError)
     };
 }

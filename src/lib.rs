@@ -1,4 +1,7 @@
 mod macros;
+
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::RangeInclusive;
 
 /// Function that parses the content of a range header
@@ -85,7 +88,7 @@ fn parse_range_header_value(range_header_value: &str, unit_sep: &str) -> ParsedR
 }
 
 #[inline]
-fn parse_inner(range: &str) -> ParsedRange {
+fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedError> {
     if range.contains(' ') {
         return invalid!(format!(
             "Range: {} is not acceptable, contains whitespace in range part.",
@@ -112,10 +115,10 @@ fn parse_inner(range: &str) -> ParsedRange {
                 if end == 0 {
                     return invalid!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
                 } else {
-                    return ParsedRange::syntactically_correct(
+                    return Ok(SyntacticallyCorrectRange::new(
                         RangePosition::FromLast(end),
                         RangePosition::LastByte,
-                    );
+                    ));
                 }
             }
             return invalid!(format!(
@@ -125,10 +128,10 @@ fn parse_inner(range: &str) -> ParsedRange {
         }
         if let Some(start) = strict_parse_u64(start) {
             if end == "" {
-                return ParsedRange::syntactically_correct(
+                return Ok(SyntacticallyCorrectRange::new(
                     RangePosition::Index(start),
                     RangePosition::LastByte,
-                );
+                ));
             }
             if let Some(end) = strict_parse_u64(end) {
                 return ParsedRange::syntactically_correct(
@@ -168,7 +171,7 @@ fn split_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParsedRanges {
-    ranges: Vec<ParsedRange>,
+    ranges: Vec<Result<SyntacticallyCorrectRange, RangeMalformedError>>,
     invalid: usize,
     well_formed: usize,
 }
@@ -182,14 +185,14 @@ impl ParsedRanges {
         }
     }
 
-    fn single(range: ParsedRange) -> Self {
+    fn single(range: Result<SyntacticallyCorrectRange, RangeMalformedError>) -> Self {
         let mut new = ParsedRanges::empty();
         new.push(range);
         new
     }
 
-    fn push(&mut self, range: ParsedRange) {
-        if range.invalid() {
+    fn push(&mut self, range: Result<SyntacticallyCorrectRange, RangeMalformedError>) {
+        if range.is_err() {
             self.invalid += 1;
         } else {
             self.well_formed += 1;
@@ -215,6 +218,7 @@ impl ParsedRanges {
 
     pub fn validate(&self, file_size_bytes: u64) -> Vec<ValidatedRange> {
         let mut validated = Vec::new();
+        let mut ranges = Vec::new();
         let len = self.ranges.len();
         for parsed in &self.ranges {
             match parsed {
@@ -250,9 +254,11 @@ impl ParsedRanges {
                     };
                     if end < file_size_bytes {
                         let valid = RangeInclusive::new(start, end);
-                        validated.push(ValidatedRange::Satisfiable(valid));
                         if len == 1 {
+                            validated.push(ValidatedRange::Satisfiable(valid));
                             return validated;
+                        } else {
+                            ranges.push(valid)
                         }
                     } else {
                         validated.push(unsatisfiable!("Range end exceedes EOF".to_string()));
@@ -263,8 +269,8 @@ impl ParsedRanges {
                 }
             }
         }
-        match validate_ranges(validated.as_slice()) {
-            RangeValidationResult::Valid => validated,
+        match validate_ranges(ranges.as_slice()) {
+            RangeValidationResult::Valid => ranges.into_iter().for_each(|r| validated.push(r)),
             RangeValidationResult::Overlapping => vec![unsatisfiable!("Ranges overlap")],
             RangeValidationResult::Reversed => vec![unsatisfiable!("Range reversed")],
         }
@@ -278,6 +284,33 @@ pub enum ValidatedRange {
     Satisfiable(RangeInclusive<u64>),
     Unsatisfiable(String)
 }
+
+#[cfg(feature = "with_error_cause")]
+#[derive(Debug, Clone)]
+pub struct RangeUnsatisfiableError {
+    msg: String,
+}
+
+#[cfg(feature = "with_error_cause")]
+impl RangeUnsatisfiableError {
+    fn new(msg: String) {
+        RangeUnsatisfiableError {
+            msg
+        }
+    }
+}
+
+#[cfg(not(feature = "with_error_cause"))]
+#[derive(Copy, Clone, Debug)]
+pub struct RangeUnsatisfiableError;
+
+impl Display for RangeUnsatisfiableError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.msg)
+    }
+}
+
+impl Error for RangeUnsatisfiableError {}
 
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "with_error_cause"))]
@@ -319,6 +352,24 @@ pub enum ParsedRange {
     SyntacticallyCorrect(SyntacticallyCorrectRange),
     Invalid(String),
 }
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg(feature = "with_error_cause")]
+pub struct RangeMalformedError {
+    msg: String
+}
+
+#[cfg(feature = "with_error_cause")]
+impl RangeMalformedError {
+    pub fn new(msg: String) -> Self {
+        RangeMalformedError { msg }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg(not(feature = "with_error_cause"))]
+pub struct RangeMalformedError;
+
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg(not(feature = "with_error_cause"))]
