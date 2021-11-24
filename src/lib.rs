@@ -10,6 +10,8 @@ use std::ops::RangeInclusive;
 ///
 /// And here https://datatracker.ietf.org/doc/html/rfc7233
 ///
+/// Will only accept bytes ranges, will update when https://www.iana.org/assignments/http-parameters/http-parameters.xhtml changes to allow other units.
+///
 /// Parses ranges strictly, as in the examples contained in the above specifications.
 ///
 /// Ranges such as `bytes=0-15, 16-20, abc` will be rejected immediately.
@@ -113,26 +115,19 @@ use std::ops::RangeInclusive;
 ///
 
 pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
-    parse_range_header_value(range_header_value, "bytes=")
-}
-
-#[inline]
-fn parse_range_header_value(
-    range_header_value: &str,
-    unit_sep: &str,
-) -> Result<ParsedRanges, RangeMalformedError> {
+    let unit_sep = "bytes=";
     if !range_header_value.starts_with(unit_sep) {
         return invalid!(format!(
-            "Range: {} is not acceptable, does not start with {}",
-            range_header_value, unit_sep,
-        ));
+        "Range: {} is not acceptable, does not start with {}",
+        range_header_value, unit_sep,
+    ));
     }
     let unit_sep_count = range_header_value.match_indices(unit_sep).count();
     if unit_sep_count != 1 {
         return invalid!(format!(
-            "Range: {} is not acceptable, unit separator {} occurs more than once",
-            range_header_value, unit_sep,
-        ));
+        "Range: {} is not acceptable, unit separator {} occurs more than once",
+        range_header_value, unit_sep,
+    ));
     }
     let start = split_once(range_header_value, unit_sep);
     let mut ranges = Vec::new();
@@ -140,9 +135,9 @@ fn parse_range_header_value(
     if let Some((_, indicated_range)) = start {
         if indicated_range.starts_with(char::is_whitespace) {
             return invalid!(format!(
-                "Range: {} is not acceptable, starts with whitespace",
-                range_header_value
-            ));
+            "Range: {} is not acceptable, starts with whitespace",
+            range_header_value
+        ));
         }
         for range in indicated_range.split(",") {
             if let Some(trimmed) = trim(range) {
@@ -152,22 +147,22 @@ fn parse_range_header_value(
                 }
             } else {
                 return invalid!(format!(
-                    "Range: {} is not acceptable, range contains illegal whitespaces",
-                    range_header_value
-                ));
+                "Range: {} is not acceptable, range contains illegal whitespaces",
+                range_header_value
+            ));
             }
         }
     } else {
         return invalid!(format!(
-            "Range: {} is not acceptable, range does not start with '{}'",
-            range_header_value, unit_sep
-        ));
+        "Range: {} is not acceptable, range does not start with '{}'",
+        range_header_value, unit_sep
+    ));
     }
     if ranges.is_empty() {
         invalid!(format!(
-            "Range: {} could not be parsed for an unknown reason, please file an issue",
-            range_header_value
-        ))
+        "Range: {} could not be parsed for an unknown reason, please file an issue",
+        range_header_value
+    ))
     } else {
         Ok(ParsedRanges::new(ranges))
     }
@@ -446,7 +441,7 @@ enum EndPosition {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parse_range_header, parse_range_header_value, EndPosition, ParsedRanges, StartPosition,
+        parse_range_header, EndPosition, ParsedRanges, StartPosition,
         SyntacticallyCorrectRange,
     };
     use std::ops::RangeInclusive;
@@ -531,18 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_standard_range_with_custom_unit() {
-        let input = "my_unit=0-1023";
-        let expect =
-            SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::Index(1023));
-        let actual = parse_range_header_value(input, "my_unit=").unwrap();
-        assert_eq!(single_range(expect), actual);
-        let expect = RangeInclusive::new(0, 1023);
-        let actual = actual.validate(TEST_FILE_LENGTH).unwrap()[0].clone();
-        assert_eq!(expect, actual);
-    }
-
-    #[test]
     fn parse_open_ended_range() {
         let input = "bytes=0-";
         let expect = SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::LastByte);
@@ -570,49 +553,49 @@ mod tests {
     #[test]
     fn parse_empty_as_invalid() {
         let input = "";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_empty_range_as_invalid() {
         let input = "bytes=";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_bad_unit_as_invalid() {
         let input = "abcde=0-10";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_missing_equals_as_malformed() {
         let input = "bytes0-10";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_negative_bad_characters_in_range_as_malformed() {
         let input = "bytes=1-10a";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_negative_numbers_as_malformed() {
         let input = "bytes=-1-10";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn parse_out_of_bounds_overrun_as_unsatisfiable() {
         let input = &format!("bytes=0-{}", TEST_FILE_LENGTH);
-        let parsed = parse_range_header_value(input, "bytes=")
+        let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
         assert!(parsed.is_err());
@@ -621,7 +604,7 @@ mod tests {
     #[test]
     fn parse_out_of_bounds_suffix_overrun_as_unsatisfiable() {
         let input = &format!("bytes=-{}", TEST_FILE_LENGTH + 1);
-        let parsed = parse_range_header_value(input, "bytes=")
+        let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
         assert!(parsed.is_err());
@@ -630,7 +613,7 @@ mod tests {
     #[test]
     fn parse_zero_length_suffix_as_unsatisfiable() {
         let input = &format!("bytes=-0");
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err());
     }
 
@@ -643,7 +626,7 @@ mod tests {
             SyntacticallyCorrectRange::new(StartPosition::Index(4000), EndPosition::Index(4500)),
             SyntacticallyCorrectRange::new(StartPosition::Index(8000), EndPosition::Index(9999)),
         ];
-        let parsed = parse_range_header_value(input, "bytes=").unwrap();
+        let parsed = parse_range_header(input).unwrap();
         assert_eq!(expected_ranges, parsed.ranges);
         let validated = parsed.validate(TEST_FILE_LENGTH).unwrap();
         assert_eq!(
@@ -659,7 +642,7 @@ mod tests {
             SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::Index(1023)),
             SyntacticallyCorrectRange::new(StartPosition::Index(1024), EndPosition::LastByte),
         ];
-        let parsed = parse_range_header_value(input, "bytes=").unwrap();
+        let parsed = parse_range_header(input).unwrap();
         assert_eq!(expected_ranges, parsed.ranges);
         let validated = parsed.validate(TEST_FILE_LENGTH).unwrap();
         assert_eq!(vec![0..=1023, 1024..=9999], validated);
@@ -672,11 +655,11 @@ mod tests {
             SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::Index(1023)),
             SyntacticallyCorrectRange::new(StartPosition::FromLast(1000), EndPosition::LastByte),
         ];
+        let parsed = parse_range_header(input).unwrap();
         assert_eq!(
             expected_ranges,
-            parse_range_header_value(input, "bytes=").unwrap().ranges
+            parsed.ranges
         );
-        let parsed = parse_range_header_value(input, "bytes=").unwrap();
         assert_eq!(expected_ranges, parsed.ranges);
         let validated = parsed.validate(TEST_FILE_LENGTH).unwrap();
         assert_eq!(vec![0..=1023, 9000..=9999], validated);
@@ -705,7 +688,7 @@ mod tests {
         let input = "bytes=8000-9000, -1000";
         assert_validation_err(input);
         let input = "bytes=8000-9000, -999";
-        let parsed = parse_range_header_value(input, "bytes=")
+        let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
         assert!(parsed.is_ok());
@@ -718,7 +701,7 @@ mod tests {
     }
 
     fn assert_validation_err(input: &str) {
-        let parsed = parse_range_header_value(input, "bytes=")
+        let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
         assert!(parsed.is_err())
@@ -727,7 +710,7 @@ mod tests {
     #[test]
     fn parse_multi_range_rejects_invalid() {
         let input = "bytes=0-15, 25, 9, ";
-        let parsed = parse_range_header_value(input, "bytes=");
+        let parsed = parse_range_header(input);
         assert!(parsed.is_err())
     }
 

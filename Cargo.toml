@@ -5,12 +5,11 @@ edition = "2018"
 license = "MIT"
 readme = "./README.md"
 description = "No-dep range header parser"
-repository = "https://github.com/MarcusGrass/range_header"
-homepage = "https://github.com/MarcusGrass/range_header"
+repository = "https://github.com/MarcusGrass/parse-range-headers"
+homepage = "https://github.com/MarcusGrass/parse-range-headers"
 categories = ["parser-implementations", "network-programming", "web-programming"]
-
-[description]
-
+keywords = ["http", "parser", "http-headers", "headers", "range"]
+exclude = ["/fuzz"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 with_error_cause = []
