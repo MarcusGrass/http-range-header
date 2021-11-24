@@ -1,5 +1,3 @@
-mod macros;
-
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::RangeInclusive;
@@ -56,6 +54,7 @@ use std::ops::RangeInclusive;
 /// let input = "bytes=0-15";
 /// let file_size_bytes = 512;
 /// let parsed_ranges = parse_range_headers::parse_range_header(input);
+///
 /// match parsed_ranges {
 ///     Ok(ranges) => {
 ///         match ranges.validate(file_size_bytes) {
@@ -112,7 +111,34 @@ use std::ops::RangeInclusive;
 /// // Some ranges overlap, all valid ranges get truncated to 1 Err
 /// assert!(validated.is_err());
 /// ```
-///
+
+#[cfg(feature = "with_error_cause")]
+macro_rules! invalid {
+    ($create:expr) => {
+        Err(RangeMalformedError::new($create))
+    };
+}
+
+#[cfg(not(feature = "with_error_cause"))]
+macro_rules! invalid {
+    ($create:expr) => {
+        Err(RangeMalformedError)
+    };
+}
+
+#[cfg(feature = "with_error_cause")]
+macro_rules! unsatisfiable {
+    ($create:expr) => {
+        Err(RangeUnsatisfiableError::new($create))
+    };
+}
+
+#[cfg(not(feature = "with_error_cause"))]
+macro_rules! unsatisfiable {
+    ($create:expr) => {
+        Err(RangeUnsatisfiableError)
+    };
+}
 
 pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
     let unit_sep = "bytes=";
@@ -310,13 +336,6 @@ impl ParsedRanges {
     }
 }
 
-#[derive(Debug, Clone)]
-#[cfg(feature = "with_error_cause")]
-pub enum ValidatedRange {
-    Satisfiable(RangeInclusive<u64>),
-    Unsatisfiable(String),
-}
-
 #[cfg(feature = "with_error_cause")]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RangeUnsatisfiableError {
@@ -415,7 +434,7 @@ impl Display for RangeMalformedError {
 pub struct RangeMalformedError;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct SyntacticallyCorrectRange {
+struct SyntacticallyCorrectRange {
     start: StartPosition,
     end: EndPosition,
 }
