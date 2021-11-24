@@ -14,8 +14,9 @@ fuzz_target!(|data: &[u8]| {
         if STANDARD_RANGE.is_match(s) {
             return;
         }
-        //assert_no_other_start_than_bytes(s);
-        save_accepted_outside_rex(s);
+        if let Ok(parsed) = parse_range_header(s) {
+            assert!(parsed.validate(u64::MAX).is_err());
+        }
     }
 
 });
@@ -30,16 +31,5 @@ fn save_accepted_outside_rex(s: &str) {
             let res = format!("{} : {:?}\n", s, validated);
             write.write(res.as_bytes()).unwrap();
         }
-    }
-}
-
-fn assert_no_other_start_than_bytes(s: &str) {
-    let input = if !s.starts_with("bytes=") {
-        s.to_owned()
-    } else {
-        s.replace("bytes", "")
-    };
-    if let Ok(parsed) = parse_range_header(&input) {
-        assert!(parsed.validate(u64::MAX).is_err());
     }
 }

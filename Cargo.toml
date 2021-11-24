@@ -10,3 +10,6 @@ with_error_cause = []
 [dependencies]
 
 [dev-dependencies]
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
+regex = "1.5.4"
