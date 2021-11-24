@@ -1,0 +1,23 @@
+[package]
+name = "parse_range_headers"
+version = "0.1.0"
+edition = "2018"
+license = "MIT"
+readme = "./README.md"
+description = "No-dep range header parser"
+repository = "https://github.com/MarcusGrass/range_header"
+homepage = "https://github.com/MarcusGrass/range_header"
+categories = ["parser-implementations", "network-programming", "web-programming"]
+
+[description]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+with_error_cause = []
+
+[dependencies]
+
+[dev-dependencies]
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
+regex = "1.5.4"

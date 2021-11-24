@@ -1,0 +1,22 @@
+name: check_commit
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build no features
+        run: cargo build --no-default-features --verbose
+      - name: Run tests no features
+        run: cargo test --no-default-features
+      - name: Build with error cause
+        run: cargo test --features with_error_cause
+      - name: Run tests with error cause
+        run: cargo test --features with_error_cause
