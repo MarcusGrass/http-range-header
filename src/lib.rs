@@ -7,11 +7,26 @@ use std::ops::RangeInclusive;
 /// Function that parses the content of a range header
 /// Follows the spec here https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range
 /// But with a bit more lax parsing, leaving the user to determine whether or not to accept partially invalid ranges
+/// Ranges such as `bytes=0-15, 16-20, abc` will be accepted but only the first two valid once will pass validation
+///
+/// The parser makes two passes, one without a known file_size, separating syntactically correct ranges from invalid ones.
+/// The returned struct will through its `validate` method accept a file-size and figure out whether or not the
+/// syntactically correct ranges actually makes sense in context
+///
+/// The range `bytes=0-20` on a file with 15 bytes will be accepted in the first pass as the content_size is unknown.
+/// On the second pass (`validate`) it will be rejected and produce an error
+///
+/// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
+/// will become two syntactically correct ranges, then both removed if the ranges overlap when using `validate`
+///
+/// All valid ranges will be scrubbed if some ranges don't make sense. The range `bytes=0-20, 55-25`
+/// will therefore not produce any valid range after using `validate`
+/// The same is true for the range `bytes=0-25, 5-10, 35-55` Only two ranges overlap but no valid ranges will be returned on `validate`
 ///
 /// # Example with a standard valid range
 ///
 /// ```
-/// let input = "bytes=0-15";///
+/// let input = "bytes=0-15";
 /// let file_size_bytes = 512;
 /// let parsed_ranges = parse_range_headers::parse_range_header(input);
 /// if parsed_ranges.any_invalid() {
@@ -20,17 +35,18 @@ use std::ops::RangeInclusive;
 /// if parsed_ranges.any_well_formed() {
 ///     // To know if a given range is valid we need to know the underlying content size
 ///     let validated = parsed_ranges.validate(file_size_bytes);
+///     assert_eq!(1, validated.len());
 ///     for range in validated {
 ///         if let Ok(valid) = range {
 ///             // Do something with the valid range
+///             assert_eq!(0..=15, valid);
 ///         } else {
-///
+///             // Do something if you encounter some range that doesn't make sense
+///             panic!("Oh no bad range");
 ///         }
 ///     }
-///
 /// }
 /// ```
-///
 pub fn parse_range_header(range_header_value: &str) -> ParsedRanges {
     parse_range_header_value(range_header_value, "bytes=")
 }
