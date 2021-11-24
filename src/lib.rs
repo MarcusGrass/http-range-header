@@ -118,30 +118,22 @@ mod macros;
 
 pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
     let unit_sep = "bytes=";
-    if !range_header_value.starts_with(unit_sep) {
-        return invalid!(format!(
-            "Range: {} is not acceptable, does not start with {}",
-            range_header_value, unit_sep,
-        ));
-    }
-    let unit_sep_count = range_header_value.match_indices(unit_sep).count();
-    if unit_sep_count != 1 {
-        return invalid!(format!(
-            "Range: {} is not acceptable, unit separator {} occurs more than once",
-            range_header_value, unit_sep,
-        ));
-    }
-    let start = split_once(range_header_value, unit_sep);
     let mut ranges = Vec::new();
-
-    if let Some((_, indicated_range)) = start {
+    if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, unit_sep) {
         if indicated_range.starts_with(char::is_whitespace) {
             return invalid!(format!(
                 "Range: {} is not acceptable, starts with whitespace",
                 range_header_value
             ));
         }
-        for range in indicated_range.split(",") {
+        if !prefix.is_empty() {
+            return invalid!(format!(
+                "Range: {} is not acceptable, does not start with {}",
+                range_header_value,
+                unit_sep
+            ));
+        }
+        for range in indicated_range.split(',') {
             if let Some(trimmed) = trim(range) {
                 match parse_inner(trimmed) {
                     Ok(parsed) => ranges.push(parsed),
@@ -180,28 +172,8 @@ fn trim<'a>(s: &'a str) -> Option<&'a str> {
 
 #[inline]
 fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedError> {
-    if range.contains(' ') {
-        return invalid!(format!(
-            "Range: {} is not acceptable, contains whitespace in range part.",
-            range
-        ));
-    }
-    let sep_count = range.match_indices("-").count();
-    if sep_count != 1 {
-        if sep_count == 0 {
-            return invalid!(format!(
-                "Range: {} is not acceptable, contains no dashes (-).",
-                range
-            ));
-        } else {
-            return invalid!(format!(
-                "Range: {} is not acceptable, contains multiple dashes (-).",
-                range
-            ));
-        }
-    }
-    if let Some((start, end)) = split_once(range, "-") {
-        if start == "" {
+    if let Some((start, end)) = split_exactly_once_ch(range, '-') {
+        if start.is_empty() {
             if let Some(end) = strict_parse_u64(end) {
                 if end == 0 {
                     return invalid!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
@@ -218,7 +190,7 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedE
             ));
         }
         if let Some(start) = strict_parse_u64(start) {
-            if end == "" {
+            if end.is_empty() {
                 return Ok(SyntacticallyCorrectRange::new(
                     StartPosition::Index(start),
                     EndPosition::LastByte,
@@ -241,7 +213,7 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedE
         ));
     }
     invalid!(format!(
-        "Range: {} is not acceptable, range does not contain any dashes.",
+        "Range: {} is not acceptable, range contains unexpected number of dashes.",
         range
     ))
 }
@@ -253,13 +225,25 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
     None
 }
 
-fn split_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
+fn split_exactly_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
     let mut iter = s.split(pat);
     let left = iter.next()?;
     let right = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
     Some((left, right))
 }
 
+fn split_exactly_once_ch<'a>(s: &'a str, pat: char) -> Option<(&'a str, &'a str)> {
+    let mut iter = s.split(pat);
+    let left = iter.next()?;
+    let right = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
+    Some((left, right))
+}
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedRanges {
     ranges: Vec<SyntacticallyCorrectRange>,
@@ -274,8 +258,8 @@ impl ParsedRanges {
         &self,
         file_size_bytes: u64,
     ) -> Result<Vec<RangeInclusive<u64>>, RangeUnsatisfiableError> {
-        let mut validated = Vec::new();
         let len = self.ranges.len();
+        let mut validated = Vec::with_capacity(len);
         for parsed in &self.ranges {
             let start = match parsed.start {
                 StartPosition::Index(i) => i,
@@ -357,7 +341,6 @@ enum RangeValidationResult {
     Reversed,
 }
 
-#[inline]
 fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
     let mut bounds = Vec::new();
     for range in ranges {
