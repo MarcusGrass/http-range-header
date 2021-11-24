@@ -1,6 +1,6 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
 use http_range_header::parse_range_header;
+use libfuzzer_sys::fuzz_target;
 use regex::Regex;
 
 lazy_static::lazy_static! {

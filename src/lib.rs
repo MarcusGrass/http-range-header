@@ -120,16 +120,16 @@ pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, Rang
     let unit_sep = "bytes=";
     if !range_header_value.starts_with(unit_sep) {
         return invalid!(format!(
-        "Range: {} is not acceptable, does not start with {}",
-        range_header_value, unit_sep,
-    ));
+            "Range: {} is not acceptable, does not start with {}",
+            range_header_value, unit_sep,
+        ));
     }
     let unit_sep_count = range_header_value.match_indices(unit_sep).count();
     if unit_sep_count != 1 {
         return invalid!(format!(
-        "Range: {} is not acceptable, unit separator {} occurs more than once",
-        range_header_value, unit_sep,
-    ));
+            "Range: {} is not acceptable, unit separator {} occurs more than once",
+            range_header_value, unit_sep,
+        ));
     }
     let start = split_once(range_header_value, unit_sep);
     let mut ranges = Vec::new();
@@ -137,9 +137,9 @@ pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, Rang
     if let Some((_, indicated_range)) = start {
         if indicated_range.starts_with(char::is_whitespace) {
             return invalid!(format!(
-            "Range: {} is not acceptable, starts with whitespace",
-            range_header_value
-        ));
+                "Range: {} is not acceptable, starts with whitespace",
+                range_header_value
+            ));
         }
         for range in indicated_range.split(",") {
             if let Some(trimmed) = trim(range) {
@@ -149,22 +149,22 @@ pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, Rang
                 }
             } else {
                 return invalid!(format!(
-                "Range: {} is not acceptable, range contains illegal whitespaces",
-                range_header_value
-            ));
+                    "Range: {} is not acceptable, range contains illegal whitespaces",
+                    range_header_value
+                ));
             }
         }
     } else {
         return invalid!(format!(
-        "Range: {} is not acceptable, range does not start with '{}'",
-        range_header_value, unit_sep
-    ));
+            "Range: {} is not acceptable, range does not start with '{}'",
+            range_header_value, unit_sep
+        ));
     }
     if ranges.is_empty() {
         invalid!(format!(
-        "Range: {} could not be parsed for an unknown reason, please file an issue",
-        range_header_value
-    ))
+            "Range: {} could not be parsed for an unknown reason, please file an issue",
+            range_header_value
+        ))
     } else {
         Ok(ParsedRanges::new(ranges))
     }
@@ -436,8 +436,7 @@ enum EndPosition {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parse_range_header, EndPosition, ParsedRanges, StartPosition,
-        SyntacticallyCorrectRange,
+        parse_range_header, EndPosition, ParsedRanges, StartPosition, SyntacticallyCorrectRange,
     };
     use std::ops::RangeInclusive;
 
@@ -651,10 +650,7 @@ mod tests {
             SyntacticallyCorrectRange::new(StartPosition::FromLast(1000), EndPosition::LastByte),
         ];
         let parsed = parse_range_header(input).unwrap();
-        assert_eq!(
-            expected_ranges,
-            parsed.ranges
-        );
+        assert_eq!(expected_ranges, parsed.ranges);
         assert_eq!(expected_ranges, parsed.ranges);
         let validated = parsed.validate(TEST_FILE_LENGTH).unwrap();
         assert_eq!(vec![0..=1023, 9000..=9999], validated);
