@@ -1,5 +1,7 @@
 # Range header parsing
 
+[![Latest workflow](https://github.com/MarcusGrass/parse-range-headers/workflows/check_commit/badge.svg)](https://github.com/MarcusGrass/parse-range-headers/actions)
+
 The main goal of this crate is to supply a stable parser with no dependencies that can accurately parse range headers, compliant with [RFC-7233](https://datatracker.ietf.org/doc/html/rfc7233), 
 and [MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range).
 
