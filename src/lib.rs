@@ -21,24 +21,14 @@ use std::ops::RangeInclusive;
 ///     // To know if a given range is valid we need to know the underlying content size
 ///     let validated = parsed_ranges.validate(file_size_bytes);
 ///     for range in validated {
-///         match range {
+///         if let Ok(valid) = range {
+///             // Do something with the valid range
+///         } else {
 ///
 ///         }
 ///     }
 ///
 /// }
-/// // This will serve files in the "assets" directory and
-/// // its subdirectories
-/// let service = ServeDir::new("assets");
-///
-/// # async {
-/// // Run our service using `hyper`
-/// let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
-/// hyper::Server::bind(&addr)
-///     .serve(tower::make::Shared::new(service))
-///     .await
-///     .expect("server error");
-/// # };
 /// ```
 ///
 pub fn parse_range_header(range_header_value: &str) -> ParsedRanges {
@@ -134,10 +124,10 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedE
                 ));
             }
             if let Some(end) = strict_parse_u64(end) {
-                return ParsedRange::syntactically_correct(
+                return Ok(SyntacticallyCorrectRange::new(
                     RangePosition::Index(start),
                     RangePosition::Index(end),
-                );
+                ));
             }
             return invalid!(format!(
                 "Range: {} is not acceptable, end of range not parseable.",
@@ -216,65 +206,66 @@ impl ParsedRanges {
         self.well_formed
     }
 
-    pub fn validate(&self, file_size_bytes: u64) -> Vec<ValidatedRange> {
+    pub fn validate(&self, file_size_bytes: u64) -> Vec<Result<RangeInclusive<u64>, RangeUnsatisfiableError>> {
         let mut validated = Vec::new();
         let mut ranges = Vec::new();
         let len = self.ranges.len();
         for parsed in &self.ranges {
-            match parsed {
-                ParsedRange::SyntacticallyCorrect(syntactically_correct) => {
-                    let end = match syntactically_correct.end {
-                        RangePosition::Index(i) => i,
-                        RangePosition::LastByte => file_size_bytes - 1,
-                        RangePosition::FromLast(_) => {
-                            validated.push(unsatisfiable!(
+            if let Ok(syntactically_correct) = parsed {
+                let end = match syntactically_correct.end {
+                    RangePosition::Index(i) => i,
+                    RangePosition::LastByte => file_size_bytes - 1,
+                    RangePosition::FromLast(_) => {
+                        validated.push(unsatisfiable!(
                             "Problem parsing range, please file an issue".to_string()
                         ));
-                            continue;
-                        }
-                    };
-                    let start = match syntactically_correct.start {
-                        RangePosition::Index(i) => i,
-                        RangePosition::LastByte => {
-                            validated.push(unsatisfiable!(
+                        continue;
+                    }
+                };
+                let start = match syntactically_correct.start {
+                    RangePosition::Index(i) => i,
+                    RangePosition::LastByte => {
+                        validated.push(unsatisfiable!(
                             "Problem parsing range, please file an issue".to_string()
                         ));
-                            continue;
-                        }
-                        RangePosition::FromLast(i) => {
-                            let last_byte = file_size_bytes - 1;
-                            if i > last_byte {
-                                validated.push(unsatisfiable!(
+                        continue;
+                    }
+                    RangePosition::FromLast(i) => {
+                        let last_byte = file_size_bytes - 1;
+                        if i > last_byte {
+                            validated.push(unsatisfiable!(
                                 "File suffix out of bounds (larger than file bytes)".to_string()
                             ));
-                                continue;
-                            }
-                            file_size_bytes - i
+                            continue;
                         }
-                    };
-                    if end < file_size_bytes {
-                        let valid = RangeInclusive::new(start, end);
-                        if len == 1 {
-                            validated.push(ValidatedRange::Satisfiable(valid));
-                            return validated;
-                        } else {
-                            ranges.push(valid)
-                        }
+                        file_size_bytes - i
+                    }
+                };
+                if end < file_size_bytes {
+                    let valid = RangeInclusive::new(start, end);
+                    if len == 1 {
+                        validated.push(Ok(valid));
+                        return validated;
                     } else {
-                        validated.push(unsatisfiable!("Range end exceedes EOF".to_string()));
-                        if len == 1 {
-                            return validated;
-                        }
+                        ranges.push(valid)
+                    }
+                } else {
+                    validated.push(unsatisfiable!("Range end exceedes EOF".to_string()));
+                    if len == 1 {
+                        return validated;
                     }
                 }
             }
         }
         match validate_ranges(ranges.as_slice()) {
-            RangeValidationResult::Valid => ranges.into_iter().for_each(|r| validated.push(r)),
-            RangeValidationResult::Overlapping => vec![unsatisfiable!("Ranges overlap")],
-            RangeValidationResult::Reversed => vec![unsatisfiable!("Range reversed")],
+            RangeValidationResult::Valid => {
+                ranges.into_iter()
+                    .for_each(|r| validated.push(Ok(r)));
+                validated
+            },
+            RangeValidationResult::Overlapping => vec![unsatisfiable!("Ranges overlap".to_string())],
+            RangeValidationResult::Reversed => vec![unsatisfiable!("Range reversed".to_string())],
         }
-        validated
     }
 }
 
@@ -286,14 +277,14 @@ pub enum ValidatedRange {
 }
 
 #[cfg(feature = "with_error_cause")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RangeUnsatisfiableError {
     msg: String,
 }
 
 #[cfg(feature = "with_error_cause")]
 impl RangeUnsatisfiableError {
-    fn new(msg: String) {
+    fn new(msg: String) -> Self {
         RangeUnsatisfiableError {
             msg
         }
@@ -301,12 +292,19 @@ impl RangeUnsatisfiableError {
 }
 
 #[cfg(not(feature = "with_error_cause"))]
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct RangeUnsatisfiableError;
 
 impl Display for RangeUnsatisfiableError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.msg)
+        #[cfg(feature = "with_error_cause")]
+            {
+                f.write_str(&self.msg)
+            }
+        #[cfg(not(feature = "with_error_cause"))]
+            {
+                f.write_str("RangeUnsatisfiableError")
+            }
     }
 }
 
@@ -348,13 +346,6 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg(feature = "with_error_cause")]
-pub enum ParsedRange {
-    SyntacticallyCorrect(SyntacticallyCorrectRange),
-    Invalid(String),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg(feature = "with_error_cause")]
 pub struct RangeMalformedError {
     msg: String
 }
@@ -370,29 +361,6 @@ impl RangeMalformedError {
 #[cfg(not(feature = "with_error_cause"))]
 pub struct RangeMalformedError;
 
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[cfg(not(feature = "with_error_cause"))]
-pub enum ParsedRange {
-    SyntacticallyCorrect(SyntacticallyCorrectRange),
-    Invalid,
-}
-
-impl ParsedRange {
-    fn syntactically_correct(start: RangePosition, end: RangePosition) -> Self {
-        ParsedRange::SyntacticallyCorrect(SyntacticallyCorrectRange::new(start, end))
-    }
-
-    #[cfg(feature = "with_error_cause")]
-    pub fn invalid(&self) -> bool {
-        matches!(self, ParsedRange::Invalid(_))
-    }
-
-    #[cfg(not(feature = "with_error_cause"))]
-    pub fn invalid(&self) -> bool {
-        matches!(self, ParsedRange::Invalid)
-    }
-}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct SyntacticallyCorrectRange {
@@ -418,9 +386,7 @@ pub enum RangePosition {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        parse_range_header, parse_range_header_value, ParsedRange, ParsedRanges, RangePosition,
-    };
+    use crate::{parse_range_header, parse_range_header_value, ParsedRanges, RangePosition, SyntacticallyCorrectRange};
     use std::ops::RangeInclusive;
 
     const TEST_FILE_LENGTH: u64 = 10_000;
@@ -428,10 +394,10 @@ mod tests {
     #[test]
     fn parse_standard_range() {
         let input = "bytes=0-1023";
-        let expect = ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::Index(1023));
+        let expect = Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::Index(1023)));
         let actual = parse_range_header(input);
         assert_eq!(ParsedRanges::single(expect), actual);
-        let expect = ParsedRange::Validated(RangeInclusive::new(0, 1023));
+        let expect = Ok(RangeInclusive::new(0, 1023));
         let actual = actual.validate(TEST_FILE_LENGTH)[0].clone();
         assert_eq!(expect, actual)
     }
@@ -439,10 +405,10 @@ mod tests {
     #[test]
     fn parse_standard_range_with_custom_unit() {
         let input = "my_unit=0-1023";
-        let expect = ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::Index(1023));
+        let expect = Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::Index(1023)));
         let actual = parse_range_header_value(input, "my_unit=");
         assert_eq!(ParsedRanges::single(expect), actual);
-        let expect = ParsedRange::Validated(RangeInclusive::new(0, 1023));
+        let expect = Ok(RangeInclusive::new(0, 1023));
         let actual = actual.validate(TEST_FILE_LENGTH)[0].clone();
         assert_eq!(expect, actual);
     }
@@ -450,10 +416,10 @@ mod tests {
     #[test]
     fn parse_open_ended_range() {
         let input = "bytes=0-";
-        let expect = ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::LastByte);
+        let expect = Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::LastByte));
         let actual = parse_range_header(input);
         assert_eq!(ParsedRanges::single(expect), actual);
-        let expect = ParsedRange::Validated(RangeInclusive::new(0, TEST_FILE_LENGTH - 1));
+        let expect = Ok(RangeInclusive::new(0, TEST_FILE_LENGTH - 1));
         let actual = actual.validate(TEST_FILE_LENGTH)[0].clone();
         assert_eq!(expect, actual);
     }
@@ -461,10 +427,10 @@ mod tests {
     #[test]
     fn parse_suffix_range() {
         let input = "bytes=-15";
-        let expect = ParsedRange::syntactically_correct(RangePosition::FromLast(15), RangePosition::LastByte);
+        let expect = Ok(SyntacticallyCorrectRange::new(RangePosition::FromLast(15), RangePosition::LastByte));
         let actual = parse_range_header(input);
         assert_eq!(ParsedRanges::single(expect), actual);
-        let expect = ParsedRange::Validated(RangeInclusive::new(
+        let expect = Ok(RangeInclusive::new(
             TEST_FILE_LENGTH - 15,
             TEST_FILE_LENGTH - 1,
         ));
@@ -476,82 +442,99 @@ mod tests {
     fn parse_empty_as_invalid() {
         let input = "";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_empty_range_as_invalid() {
         let input = "bytes=";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_bad_unit_as_invalid() {
         let input = "abcde=0-10";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_missing_equals_as_malformed() {
-        let input = "abcde0-10";
+        let input = "bytes0-10";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_negative_bad_characters_in_range_as_malformed() {
         let input = "bytes=1-10a";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_negative_numbers_as_malformed() {
         let input = "bytes=-1-10";
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_empty());
     }
 
     #[test]
     fn parse_out_of_bounds_overrun_as_unsatisfiable() {
         let input = &format!("bytes=0-{}", TEST_FILE_LENGTH);
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(1, parsed.well_formed);
+        assert_eq!(0, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH)[0].is_err());
     }
 
     #[test]
     fn parse_out_of_bounds_suffix_overrun_as_unsatisfiable() {
         let input = &format!("bytes=-{}", TEST_FILE_LENGTH);
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(1, parsed.well_formed);
+        assert_eq!(0, parsed.invalid);
+        assert!(parsed.validate(TEST_FILE_LENGTH)[0].is_err());
     }
 
     #[test]
     fn parse_zero_length_suffix_as_unsatisfiable() {
         let input = &format!("bytes=-0");
         let parsed =
-            parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH)[0].clone();
-        assert_invalid(parsed);
+            parse_range_header_value(input, "bytes=");
+        assert_eq!(0, parsed.well_formed);
+        assert_eq!(1, parsed.invalid);
     }
 
     #[test]
     fn parse_multi_range() {
         let input = "bytes=0-1023, 2015-3000, 4000-4500, 8000-9999";
         let expected_ranges = vec![
-            ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::Index(1023)),
-            ParsedRange::syntactically_correct(RangePosition::Index(2015), RangePosition::Index(3000)),
-            ParsedRange::syntactically_correct(RangePosition::Index(4000), RangePosition::Index(4500)),
-            ParsedRange::syntactically_correct(RangePosition::Index(8000), RangePosition::Index(9999)),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::Index(1023))),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(2015), RangePosition::Index(3000))),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(4000), RangePosition::Index(4500))),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(8000), RangePosition::Index(9999))),
         ];
         let mut expect = ParsedRanges::empty();
         expected_ranges.into_iter()
@@ -563,8 +546,8 @@ mod tests {
     fn parse_multi_range_with_open() {
         let input = "bytes=0-1023, 1024-";
         let expected_ranges = vec![
-            ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::Index(1023)),
-            ParsedRange::syntactically_correct(RangePosition::Index(1024), RangePosition::LastByte),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::Index(1023))),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(1024), RangePosition::LastByte)),
         ];
         let mut expect = ParsedRanges::empty();
         expected_ranges.into_iter()
@@ -576,8 +559,8 @@ mod tests {
     fn parse_multi_range_with_suffix() {
         let input = "bytes=0-1023, -1000";
         let expected_ranges = vec![
-            ParsedRange::syntactically_correct(RangePosition::Index(0), RangePosition::Index(1023)),
-            ParsedRange::syntactically_correct(RangePosition::FromLast(1000), RangePosition::LastByte),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::Index(0), RangePosition::Index(1023))),
+            Ok(SyntacticallyCorrectRange::new(RangePosition::FromLast(1000), RangePosition::LastByte)),
         ];
         let mut expect = ParsedRanges::empty();
         expected_ranges.into_iter()
@@ -591,7 +574,7 @@ mod tests {
         let parsed =
             parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH);
         assert_eq!(1, parsed.len());
-        assert_invalid(parsed[0].clone());
+        assert!(parsed[0].clone().is_err());
     }
 
     #[test]
@@ -599,7 +582,7 @@ mod tests {
         let input = "bytes=0-, 5000-6000";
         let parsed = parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH);
         assert_eq!(1, parsed.len());
-        assert_invalid(parsed[0].clone());
+        assert!(parsed[0].clone().is_err());
     }
 
     #[test]
@@ -607,7 +590,7 @@ mod tests {
         let input = "bytes=8000-9000, -1001";
         let parsed = parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH);
         assert_eq!(1, parsed.len());
-        assert_invalid(parsed[0].clone());
+        assert!(parsed[0].clone().is_err());
     }
 
     #[test]
@@ -615,7 +598,7 @@ mod tests {
         let input = "bytes=0-, -1";
         let parsed = parse_range_header_value(input, "bytes=").validate(TEST_FILE_LENGTH);
         assert_eq!(1, parsed.len());
-        assert_invalid(parsed[0].clone());
+        assert!(parsed[0].clone().is_err());
     }
 
     #[test]
@@ -626,18 +609,9 @@ mod tests {
         assert_eq!(1, parsed.num_well_formed());
         let validated = parsed.validate(TEST_FILE_LENGTH);
         let valid = validated.into_iter()
-            .filter(|p| matches!(p, ParsedRange::Validated(_)))
+            .filter(|p| p.is_ok())
             .count();
         assert_eq!(1, valid);
     }
 
-    #[cfg(feature = "with_error_cause")]
-    fn assert_invalid(left: ParsedRange) {
-        assert!(matches!(left, ParsedRange::Invalid(_)))
-    }
-
-    #[cfg(not(feature = "with_error_cause"))]
-    fn assert_invalid(left: ParsedRange) {
-        assert!(matches!(left, ParsedRange::Invalid))
-    }
 }
