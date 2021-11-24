@@ -1,5 +1,5 @@
 [package]
-name = "parse_range_headers-fuzz"
+name = "http-range-header-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
@@ -13,7 +13,7 @@ libfuzzer-sys = { version = "0.4" }
 regex = "1.5.4"
 lazy_static = "1.4.0"
 
-[dependencies.parse_range_headers]
+[dependencies.http-range-header]
 path = ".."
 
 # Prevent this from interfering with workspaces

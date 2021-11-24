@@ -2,6 +2,9 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::RangeInclusive;
 
+#[macro_use]
+mod macros;
+
 /// Function that parses the content of a range header.
 ///
 /// Follows the spec here https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range
@@ -20,29 +23,29 @@ use std::ops::RangeInclusive;
 /// # Example no trailing or leading whitespaces
 /// ```
 /// // Ok
-/// assert!(parse_range_headers::parse_range_header("bytes=0-15").is_ok());
+/// assert!(http_range_header::parse_range_header("bytes=0-15").is_ok());
 /// // Not allowed
-/// assert!(parse_range_headers::parse_range_header("bytes=0-15 ").is_err());
+/// assert!(http_range_header::parse_range_header("bytes=0-15 ").is_err());
 /// // Also not allowed
-/// assert!(parse_range_headers::parse_range_header("bytes= 0-15").is_err());
+/// assert!(http_range_header::parse_range_header("bytes= 0-15").is_err());
 /// ```
 ///
 /// # Example No leading whitespaces except in the case of separating multipart ranges
 /// ```
 /// // Ok, multipart with a leading whitespace after comma
-/// assert!(parse_range_headers::parse_range_header("bytes=0-15, 20-30").is_ok());
+/// assert!(http_range_header::parse_range_header("bytes=0-15, 20-30").is_ok());
 /// // Ok multipart without leading whitespace after comma
-/// assert!(parse_range_headers::parse_range_header("bytes=0-15,20-30").is_ok());
+/// assert!(http_range_header::parse_range_header("bytes=0-15,20-30").is_ok());
 /// ```
 ///
 /// # Example No negative values, no leading zeroes, no plus-sign
 /// ```
 /// // No negatives
-/// assert!(parse_range_headers::parse_range_header("bytes=-12-15").is_err());
+/// assert!(http_range_header::parse_range_header("bytes=-12-15").is_err());
 /// // No leading zeroes
-/// assert!(parse_range_headers::parse_range_header("bytes=00-15").is_err());
+/// assert!(http_range_header::parse_range_header("bytes=00-15").is_err());
 /// // No plus sign
-/// assert!(parse_range_headers::parse_range_header("bytes=+0-15").is_err());
+/// assert!(http_range_header::parse_range_header("bytes=+0-15").is_err());
 /// ```
 ///
 /// Makes two passes and parses ranges strictly. On the first pass, if any range is malformed returns an `Err`.
@@ -53,7 +56,7 @@ use std::ops::RangeInclusive;
 /// ```
 /// let input = "bytes=0-15";
 /// let file_size_bytes = 512;
-/// let parsed_ranges = parse_range_headers::parse_range_header(input);
+/// let parsed_ranges = http_range_header::parse_range_header(input);
 ///
 /// match parsed_ranges {
 ///     Ok(ranges) => {
@@ -87,7 +90,7 @@ use std::ops::RangeInclusive;
 /// ```
 /// let input = "bytes=0-20";
 /// let file_size_bytes = 15;
-/// let parsed_ranges = parse_range_headers::parse_range_header(input)
+/// let parsed_ranges = http_range_header::parse_range_header(input)
 ///     // Is syntactically correct
 ///     .unwrap();
 /// let validated = parsed_ranges.validate(file_size_bytes);
@@ -104,41 +107,14 @@ use std::ops::RangeInclusive;
 /// ```
 /// let input = "bytes=0-15, 10-20, 30-50";
 /// let file_size_bytes = 512;
-/// let parsed_ranges = parse_range_headers::parse_range_header(input)
+/// let parsed_ranges = http_range_header::parse_range_header(input)
 ///     // Is syntactically correct
 ///     .unwrap();
 /// let validated = parsed_ranges.validate(file_size_bytes);
 /// // Some ranges overlap, all valid ranges get truncated to 1 Err
 /// assert!(validated.is_err());
 /// ```
-
-#[cfg(feature = "with_error_cause")]
-macro_rules! invalid {
-    ($create:expr) => {
-        Err(RangeMalformedError::new($create))
-    };
-}
-
-#[cfg(not(feature = "with_error_cause"))]
-macro_rules! invalid {
-    ($create:expr) => {
-        Err(RangeMalformedError)
-    };
-}
-
-#[cfg(feature = "with_error_cause")]
-macro_rules! unsatisfiable {
-    ($create:expr) => {
-        Err(RangeUnsatisfiableError::new($create))
-    };
-}
-
-#[cfg(not(feature = "with_error_cause"))]
-macro_rules! unsatisfiable {
-    ($create:expr) => {
-        Err(RangeUnsatisfiableError)
-    };
-}
+///
 
 pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
     let unit_sep = "bytes=";

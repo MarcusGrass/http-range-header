@@ -1,9 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use parse_range_headers::parse_range_header;
+use http_range_header::parse_range_header;
 use regex::Regex;
-use std::fs::OpenOptions;
-use std::io::Write;
 
 lazy_static::lazy_static! {
     static ref STANDARD_RANGE: Regex = Regex::new("^bytes=((\\d+-\\d+,\\s?)|(\\d+-,\\s?)|(-\\d+,\\s?))*((\\d+-\\d+)|(\\d+-)|(-\\d+))+$").unwrap();
