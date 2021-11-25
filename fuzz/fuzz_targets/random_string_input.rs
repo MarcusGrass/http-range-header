@@ -14,7 +14,12 @@ fuzz_target!(|data: &[u8]| {
         }
         if let Ok(parsed) = parse_range_header(s) {
             let v = parsed.validate(u64::MAX);
-            assert!(parsed.validate(u64::MAX).is_err(), "range {:?} accepted as {:?}", s, v);
+            assert!(
+                parsed.validate(u64::MAX).is_err(),
+                "range {:?} accepted as {:?}",
+                s,
+                v
+            );
         }
     }
 });

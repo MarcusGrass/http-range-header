@@ -9,7 +9,7 @@ mod macros;
 ///
 /// Follows the spec here https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range
 ///
-/// And here https://datatracker.ietf.org/doc/html/rfc7233
+/// And here https://www.ietf.org/rfc/rfc2616.txt
 ///
 /// Will only accept bytes ranges, will update when https://www.iana.org/assignments/http-parameters/http-parameters.xhtml changes to allow other units.
 ///
@@ -115,11 +115,14 @@ mod macros;
 /// assert!(validated.is_err());
 /// ```
 ///
+///
+
+const UNIT_SEP: &str = "bytes=";
+const COMMA: char = ',';
 
 pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
-    let unit_sep = "bytes=";
     let mut ranges = Vec::new();
-    if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, unit_sep) {
+    if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, UNIT_SEP) {
         if indicated_range.starts_with(char::is_whitespace) {
             return invalid!(format!(
                 "Range: {} is not acceptable, starts with whitespace",
@@ -129,11 +132,10 @@ pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, Rang
         if !prefix.is_empty() {
             return invalid!(format!(
                 "Range: {} is not acceptable, does not start with {}",
-                range_header_value,
-                unit_sep
+                range_header_value, UNIT_SEP,
             ));
         }
-        for range in indicated_range.split(',') {
+        for range in indicated_range.split(COMMA) {
             if let Some(trimmed) = trim(range) {
                 match parse_inner(trimmed) {
                     Ok(parsed) => ranges.push(parsed),
@@ -149,7 +151,7 @@ pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, Rang
     } else {
         return invalid!(format!(
             "Range: {} is not acceptable, range does not start with '{}'",
-            range_header_value, unit_sep
+            range_header_value, UNIT_SEP
         ));
     }
     if ranges.is_empty() {
@@ -264,8 +266,7 @@ impl ParsedRanges {
             let start = match parsed.start {
                 StartPosition::Index(i) => i,
                 StartPosition::FromLast(i) => {
-                    let last_byte = file_size_bytes;
-                    if i > last_byte {
+                    if i > file_size_bytes {
                         return unsatisfiable!(
                             "File suffix out of bounds (larger than file bytes)".to_string()
                         );
@@ -327,13 +328,6 @@ impl Display for RangeUnsatisfiableError {
 }
 
 impl Error for RangeUnsatisfiableError {}
-
-#[derive(Debug, Clone)]
-#[cfg(not(feature = "with_error_cause"))]
-pub enum ValidatedRange {
-    Satisfiable(RangeInclusive<u64>),
-    Unsatisfiable,
-}
 
 enum RangeValidationResult {
     Valid,
