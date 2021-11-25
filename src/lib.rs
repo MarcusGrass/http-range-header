@@ -282,9 +282,6 @@ impl ParsedRanges {
             if end < file_size_bytes {
                 let valid = RangeInclusive::new(start, end);
                 validated.push(valid);
-                if len == 1 {
-                    return Ok(validated);
-                }
             } else {
                 return unsatisfiable!("Range end exceedes EOF".to_string());
             }
@@ -342,6 +339,8 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
         let end = range.end();
         if start > end {
             return RangeValidationResult::Reversed;
+        } else if ranges.len() == 1{
+            return RangeValidationResult::Valid;
         }
         bounds.push((range.start(), range.end()));
     }
@@ -589,6 +588,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_single_reversed_as_invalid() {
+        let input = &format!("bytes=15-0");
+        let parsed = parse_range_header(input).unwrap();
+        assert!(parsed.validate(TEST_FILE_LENGTH).is_err());
+    }
+
+    #[test]
     fn parse_multi_range() {
         let input = "bytes=0-1023, 2015-3000, 4000-4500, 8000-9999";
         let expected_ranges = vec![
@@ -665,6 +671,12 @@ mod tests {
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed_open() {
         let input = "bytes=0-, -1";
+        assert_validation_err(input);
+    }
+
+    #[test]
+    fn parse_multi_range_with_a_reversed_as_invalid() {
+        let input = "bytes=0-15, 30-20";
         assert_validation_err(input);
     }
 
