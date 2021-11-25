@@ -1,6 +1,6 @@
 [package]
 name = "http-range-header"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2018"
 license = "MIT"
 readme = "./README.md"
@@ -9,7 +9,7 @@ repository = "https://github.com/MarcusGrass/parse-range-headers"
 homepage = "https://github.com/MarcusGrass/parse-range-headers"
 categories = ["parser-implementations", "network-programming", "web-programming"]
 keywords = ["http", "parser", "http-headers", "headers", "range"]
-exclude = ["/.github", "CONTRIBUTING.md"]
+exclude = ["/.github", "CONTRIBUTING.md", "benches/"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 with_error_cause = []
