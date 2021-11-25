@@ -120,7 +120,9 @@ mod macros;
 const UNIT_SEP: &str = "bytes=";
 const COMMA: char = ',';
 
-pub fn parse_range_header(range_header_value: &str) -> Result<ParsedRanges, RangeMalformedError> {
+pub fn parse_range_header(
+    range_header_value: &str,
+) -> Result<ParsedRanges, RangeUnsatisfiableError> {
     let mut ranges = Vec::new();
     if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, UNIT_SEP) {
         if indicated_range.starts_with(char::is_whitespace) {
@@ -173,7 +175,7 @@ fn trim<'a>(s: &'a str) -> Option<&'a str> {
 }
 
 #[inline]
-fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeMalformedError> {
+fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfiableError> {
     if let Some((start, end)) = split_exactly_once_ch(range, '-') {
         if start.is_empty() {
             if let Some(end) = strict_parse_u64(end) {
@@ -267,7 +269,7 @@ impl ParsedRanges {
                 StartPosition::Index(i) => i,
                 StartPosition::FromLast(i) => {
                     if i > file_size_bytes {
-                        return unsatisfiable!(
+                        return invalid!(
                             "File suffix out of bounds (larger than file bytes)".to_string()
                         );
                     }
@@ -283,13 +285,13 @@ impl ParsedRanges {
                 let valid = RangeInclusive::new(start, end);
                 validated.push(valid);
             } else {
-                return unsatisfiable!("Range end exceedes EOF".to_string());
+                return invalid!("Range end exceedes EOF".to_string());
             }
         }
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
-            RangeValidationResult::Overlapping => unsatisfiable!("Ranges overlap".to_string()),
-            RangeValidationResult::Reversed => unsatisfiable!("Range reversed".to_string()),
+            RangeValidationResult::Overlapping => invalid!("Ranges overlap".to_string()),
+            RangeValidationResult::Reversed => invalid!("Range reversed".to_string()),
         }
     }
 }
@@ -339,7 +341,7 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
         let end = range.end();
         if start > end {
             return RangeValidationResult::Reversed;
-        } else if ranges.len() == 1{
+        } else if ranges.len() == 1 {
             return RangeValidationResult::Valid;
         }
         bounds.push((range.start(), range.end()));
@@ -353,37 +355,6 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
     }
     RangeValidationResult::Valid
 }
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg(feature = "with_error_cause")]
-pub struct RangeMalformedError {
-    msg: String,
-}
-
-#[cfg(feature = "with_error_cause")]
-impl RangeMalformedError {
-    pub fn new(msg: String) -> Self {
-        RangeMalformedError { msg }
-    }
-}
-
-impl Error for RangeMalformedError {}
-
-impl Display for RangeMalformedError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        #[cfg(feature = "with_error_cause")]
-        {
-            f.write_str(&self.msg)
-        }
-        #[cfg(not(feature = "with_error_cause"))]
-        {
-            f.write_str("RangeMalformedError")
-        }
-    }
-}
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[cfg(not(feature = "with_error_cause"))]
-pub struct RangeMalformedError;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 struct SyntacticallyCorrectRange {
