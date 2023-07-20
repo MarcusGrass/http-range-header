@@ -277,16 +277,12 @@ impl ParsedRanges {
                 }
             };
             let end = match parsed.end {
-                EndPosition::Index(i) => i,
+                EndPosition::Index(i) => std::cmp::min(i, file_size_bytes - 1),
                 EndPosition::LastByte => file_size_bytes - 1,
             };
 
-            if end < file_size_bytes {
-                let valid = RangeInclusive::new(start, end);
-                validated.push(valid);
-            } else {
-                return invalid!("Range end exceedes EOF".to_string());
-            }
+            let valid = RangeInclusive::new(start, end);
+            validated.push(valid);
         }
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
@@ -534,12 +530,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_out_of_bounds_overrun_as_unsatisfiable() {
+    fn parse_out_of_bounds_overrun_as_content_length() {
         let input = &format!("bytes=0-{}", TEST_FILE_LENGTH);
-        let parsed = parse_range_header(input)
+        let expect = vec![RangeInclusive::new(0, TEST_FILE_LENGTH - 1)];
+        let actual = parse_range_header(input)
             .unwrap()
-            .validate(TEST_FILE_LENGTH);
-        assert!(parsed.is_err());
+            .validate(TEST_FILE_LENGTH)
+            .unwrap();
+        assert_eq!(expect, actual);
     }
 
     #[test]
