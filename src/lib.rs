@@ -1,13 +1,8 @@
 #![warn(clippy::pedantic)]
 use core::fmt::{Debug, Display, Formatter};
 use core::ops::RangeInclusive;
-use std::error::Error;
-
-#[macro_use]
-mod macros;
 
 const UNIT_SEP: &str = "bytes=";
-const COMMA: char = ',';
 /// Function that parses the content of a range header.
 ///
 /// Follows the [spec here](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range)
@@ -123,46 +118,43 @@ const COMMA: char = ',';
 pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
-    let mut ranges = Vec::new();
-    if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, UNIT_SEP) {
+    const COMMA: char = ',';
+    if let Some((prefix, indicated_range)) = range_header_value.split_once(UNIT_SEP) {
         if indicated_range.starts_with(char::is_whitespace) {
-            return invalid!(format!(
-                "Range: {} is not acceptable, starts with whitespace",
-                range_header_value
-            ));
+            return Err(RangeUnsatisfiableError::StartsWithWhitespace);
         }
         if !prefix.is_empty() {
-            return invalid!(format!(
-                "Range: {} is not acceptable, does not start with {}",
-                range_header_value, UNIT_SEP,
-            ));
+            return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
         }
-        for range in indicated_range.split(COMMA) {
-            if let Some(trimmed) = trim(range) {
-                match parse_inner(trimmed) {
-                    Ok(parsed) => ranges.push(parsed),
-                    Err(e) => return Err(e),
+        let mut last_err = None;
+        let ranges = indicated_range
+            .split(COMMA)
+            .filter_map(|range| {
+                if let Some(trimmed) = trim(range) {
+                    match parse_inner(trimmed) {
+                        Ok(parsed) => Some(parsed),
+                        Err(e) => {
+                            last_err = Some(e);
+                            None
+                        }
+                    }
+                } else {
+                    last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
+                    None
                 }
-            } else {
-                return invalid!(format!(
-                    "Range: {} is not acceptable, range contains illegal whitespaces",
-                    range_header_value
-                ));
-            }
+            })
+            .collect::<Vec<SyntacticallyCorrectRange>>();
+        if let Some(last_err) = last_err {
+            return Err(last_err);
+        }
+        if ranges.is_empty() {
+            // Some other error should have been caught before we end up here
+            Err(RangeUnsatisfiableError::Empty)
+        } else {
+            Ok(ParsedRanges::new(ranges))
         }
     } else {
-        return invalid!(format!(
-            "Range: {} is not acceptable, range does not start with '{}'",
-            range_header_value, UNIT_SEP
-        ));
-    }
-    if ranges.is_empty() {
-        invalid!(format!(
-            "Range: {} could not be parsed for an unknown reason, please file an issue",
-            range_header_value
-        ))
-    } else {
-        Ok(ParsedRanges::new(ranges))
+        Err(RangeUnsatisfiableError::DoesNotStartWithToken)
     }
 }
 
@@ -176,21 +168,18 @@ fn trim(s: &str) -> Option<&str> {
 
 #[inline]
 fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfiableError> {
-    if let Some((start, end)) = split_exactly_once_ch(range, '-') {
+    if let Some((start, end)) = range.split_once('-') {
         if start.is_empty() {
             if let Some(end) = strict_parse_u64(end) {
                 if end == 0 {
-                    return invalid!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
+                    return Err(RangeUnsatisfiableError::ZeroSuffix);
                 }
                 return Ok(SyntacticallyCorrectRange::new(
                     StartPosition::FromLast(end),
                     EndPosition::LastByte,
                 ));
             }
-            return invalid!(format!(
-                "Range: {} is not acceptable, end of range not parseable.",
-                range
-            ));
+            return Err(RangeUnsatisfiableError::BadEndOfRange);
         }
         if let Some(start) = strict_parse_u64(start) {
             if end.is_empty() {
@@ -205,20 +194,11 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
                     EndPosition::Index(end),
                 ));
             }
-            return invalid!(format!(
-                "Range: {} is not acceptable, end of range not parseable.",
-                range
-            ));
+            return Err(RangeUnsatisfiableError::BadEndOfRange);
         }
-        return invalid!(format!(
-            "Range: {} is not acceptable, start of range not parseable.",
-            range
-        ));
+        return Err(RangeUnsatisfiableError::BadStartOfRange);
     }
-    invalid!(format!(
-        "Range: {} is not acceptable, range contains unexpected number of dashes.",
-        range
-    ))
+    Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
 }
 
 fn strict_parse_u64(s: &str) -> Option<u64> {
@@ -228,25 +208,6 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
     None
 }
 
-fn split_exactly_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
-    let mut iter = s.split(pat);
-    let left = iter.next()?;
-    let right = iter.next()?;
-    if iter.next().is_some() {
-        return None;
-    }
-    Some((left, right))
-}
-
-fn split_exactly_once_ch(s: &str, pat: char) -> Option<(&str, &str)> {
-    let mut iter = s.split(pat);
-    let left = iter.next()?;
-    let right = iter.next()?;
-    if iter.next().is_some() {
-        return None;
-    }
-    Some((left, right))
-}
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedRanges {
     ranges: Vec<SyntacticallyCorrectRange>,
@@ -271,9 +232,7 @@ impl ParsedRanges {
                 StartPosition::Index(i) => i,
                 StartPosition::FromLast(i) => {
                     if i > file_size_bytes {
-                        return invalid!(
-                            "File suffix out of bounds (larger than file bytes)".to_string()
-                        );
+                        return Err(RangeUnsatisfiableError::FileSuffixOutOfBounds);
                     }
                     file_size_bytes - i
                 }
@@ -290,43 +249,68 @@ impl ParsedRanges {
         #[allow(clippy::match_same_arms)]
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
-            RangeValidationResult::Overlapping => invalid!("Ranges overlap".to_string()),
-            RangeValidationResult::Reversed => invalid!("Range reversed".to_string()),
+            RangeValidationResult::Overlapping => Err(RangeUnsatisfiableError::OverlappingRanges),
+            RangeValidationResult::Reversed => Err(RangeUnsatisfiableError::RangeReversed),
         }
     }
 }
 
-#[cfg(feature = "with_error_cause")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RangeUnsatisfiableError {
-    msg: String,
-}
-
-#[cfg(feature = "with_error_cause")]
-impl RangeUnsatisfiableError {
-    fn new(msg: String) -> Self {
-        RangeUnsatisfiableError { msg }
-    }
-}
-
-#[cfg(not(feature = "with_error_cause"))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct RangeUnsatisfiableError;
+pub enum RangeUnsatisfiableError {
+    OverlappingRanges,
+    RangeReversed,
+    FileSuffixOutOfBounds,
+    IllegalWhitespace,
+    StartsWithWhitespace,
+    DoesNotStartWithToken,
+    ZeroSuffix,
+    BadStartOfRange,
+    BadEndOfRange,
+    UnexpectedNumberOfDashes,
+    Empty,
+}
 
 impl Display for RangeUnsatisfiableError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        #[cfg(feature = "with_error_cause")]
-        {
-            f.write_str(&self.msg)
-        }
-        #[cfg(not(feature = "with_error_cause"))]
-        {
-            f.write_str("RangeUnsatisfiableError")
+        match self {
+            RangeUnsatisfiableError::OverlappingRanges => {
+                f.write_str("RangeUnsatisfiable: Ranges overlap")
+            }
+            RangeUnsatisfiableError::RangeReversed => {
+                f.write_str("RangeUnsatisfiable: Reversed range")
+            }
+            RangeUnsatisfiableError::FileSuffixOutOfBounds => f.write_str(
+                "RangeUnsatisfiable: File suffix out of bounds (larger than file bytes)",
+            ),
+            RangeUnsatisfiableError::IllegalWhitespace => {
+                f.write_str("RangeUnsatisfiable: Illegal whitespaces in range")
+            }
+            RangeUnsatisfiableError::StartsWithWhitespace => {
+                f.write_str("RangeUnsatisfiable: Range starts with whitespace")
+            }
+            RangeUnsatisfiableError::DoesNotStartWithToken => f.write_fmt(format_args!(
+                "RangeUnsatisfiable: Range does not start with token '{UNIT_SEP}'"
+            )),
+            RangeUnsatisfiableError::ZeroSuffix => {
+                f.write_str("RangeUnsatisfiable: Range ends at 0")
+            }
+            RangeUnsatisfiableError::BadStartOfRange => {
+                f.write_str("RangeUnsatisfiable: Unparseable start of range")
+            }
+            RangeUnsatisfiableError::BadEndOfRange => {
+                f.write_str("RangeUnsatisfiable: Unparseable end of range")
+            }
+            RangeUnsatisfiableError::UnexpectedNumberOfDashes => {
+                f.write_str("RangeUnsatisfiable: Unexpected number of dashes")
+            }
+            RangeUnsatisfiableError::Empty => f.write_str(
+                "RangeUnsatisfiable: Failed to parse range fallback error, please file an issue",
+            ),
         }
     }
 }
 
-impl Error for RangeUnsatisfiableError {}
+impl std::error::Error for RangeUnsatisfiableError {}
 
 enum RangeValidationResult {
     Valid,
@@ -383,9 +367,10 @@ enum EndPosition {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parse_range_header, EndPosition, ParsedRanges, StartPosition, SyntacticallyCorrectRange,
+        parse_range_header, EndPosition, ParsedRanges, RangeUnsatisfiableError, StartPosition,
+        SyntacticallyCorrectRange,
     };
-    use std::ops::RangeInclusive;
+    use core::ops::RangeInclusive;
 
     const TEST_FILE_LENGTH: u64 = 10_000;
     /// Testing standard range compliance against https://datatracker.ietf.org/doc/html/rfc7233
@@ -495,42 +480,79 @@ mod tests {
     fn parse_empty_as_invalid() {
         let input = "";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::DoesNotStartWithToken));
     }
 
     #[test]
     fn parse_empty_range_as_invalid() {
         let input = "bytes=";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        // 0 is unexpected
+        assert_eq!(
+            parsed,
+            Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
+        );
+    }
+
+    #[test]
+    fn parse_range_starting_with_whitespace_as_invalid() {
+        let input = "bytes= 0-15";
+        let parsed = parse_range_header(input);
+        // 0 is unexpected
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::StartsWithWhitespace));
+    }
+
+    #[test]
+    fn parse_range_token_starting_with_whitespace_as_invalid() {
+        let input = " bytes=0-15";
+        let parsed = parse_range_header(input);
+        // 0 is unexpected
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::DoesNotStartWithToken));
+    }
+
+    #[test]
+    fn parse_range_strict_parse_numerical() {
+        let input = "bytes=+0-15";
+        let parsed = parse_range_header(input);
+        // 0 is unexpected
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
     }
 
     #[test]
     fn parse_bad_unit_as_invalid() {
         let input = "abcde=0-10";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::DoesNotStartWithToken));
     }
 
     #[test]
     fn parse_missing_equals_as_malformed() {
         let input = "bytes0-10";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::DoesNotStartWithToken));
     }
 
     #[test]
     fn parse_negative_bad_characters_in_range_as_malformed() {
         let input = "bytes=1-10a";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadEndOfRange));
     }
 
     #[test]
     fn parse_negative_numbers_as_malformed() {
         let input = "bytes=-1-10";
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        // Becomes bad eor, since -1 signals suffixed range
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadEndOfRange));
+    }
+
+    #[test]
+    fn parse_bad_characters_in_start_of_range() {
+        let input = "bytes=a1-10";
+        let parsed = parse_range_header(input);
+        // Becomes bad eor, since -1 signals suffixed range
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
     }
 
     #[test]
@@ -550,21 +572,24 @@ mod tests {
         let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::FileSuffixOutOfBounds));
     }
 
     #[test]
     fn parse_zero_length_suffix_as_unsatisfiable() {
         let input = &format!("bytes=-0");
         let parsed = parse_range_header(input);
-        assert!(parsed.is_err());
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::ZeroSuffix));
     }
 
     #[test]
     fn parse_single_reversed_as_invalid() {
         let input = &format!("bytes=15-0");
         let parsed = parse_range_header(input).unwrap();
-        assert!(parsed.validate(TEST_FILE_LENGTH).is_err());
+        assert_eq!(
+            parsed.validate(TEST_FILE_LENGTH),
+            Err(RangeUnsatisfiableError::RangeReversed)
+        );
     }
 
     #[test]
@@ -615,49 +640,50 @@ mod tests {
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_standard() {
         let input = "bytes=0-1023, 500-800";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
         let input = "bytes=0-0, 0-15";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
         let input = "bytes=0-20, 20-35";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_open() {
         let input = "bytes=0-, 5000-6000";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed() {
         let input = "bytes=8000-9000, -1001";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
         let input = "bytes=8000-9000, -1000";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
+        // This doesn't overlap
         let input = "bytes=8000-9000, -999";
-        let parsed = parse_range_header(input)
+        parse_range_header(input)
             .unwrap()
-            .validate(TEST_FILE_LENGTH);
-        assert!(parsed.is_ok());
+            .validate(TEST_FILE_LENGTH)
+            .unwrap();
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed_open() {
         let input = "bytes=0-, -1";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
     }
 
     #[test]
     fn parse_multi_range_with_a_reversed_as_invalid() {
         let input = "bytes=0-15, 30-20";
-        assert_validation_err(input);
+        assert_validation_err(input, RangeUnsatisfiableError::RangeReversed);
     }
 
-    fn assert_validation_err(input: &str) {
+    fn assert_validation_err(input: &str, err: RangeUnsatisfiableError) {
         let parsed = parse_range_header(input)
             .unwrap()
             .validate(TEST_FILE_LENGTH);
-        assert!(parsed.is_err())
+        assert_eq!(Err(err), parsed);
     }
 
     #[test]

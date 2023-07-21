@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Fixed
 
+## [0.4.0] - ReleaseDate
+### Added
+- Bench error performance
+
+### Changed
+- Msrv set to 1.60.0 to match [tower-http](https://github.com/tower-rs/tower-http)
+- Use higher `Rust` version features to improve performance
+- Remove feature `with_error_cause`
+- Convert Error into an enum
+
+### Fixed
+
 ## [0.3.1] - 2023-07-21
 
 ### Fixed
