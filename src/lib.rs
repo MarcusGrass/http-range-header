@@ -85,16 +85,16 @@ mod macros;
 /// syntactically correct ranges actually makes sense in context
 ///
 /// The range `bytes=0-20` on a file with 15 bytes will be accepted in the first pass as the content_size is unknown.
-/// On the second pass (`validate`) it will be rejected and produce an error
-/// # Example range fails `validate` because it exceedes file boundaries
+/// On the second pass (`validate`) it will be truncated to `file_size - 1` as per [the spec](https://httpwg.org/specs/rfc9110.html#rfc.section.14.1.2).
+/// # Example range truncates in `validate` because it exceedes
 /// ```
 /// let input = "bytes=0-20";
 /// let file_size_bytes = 15;
 /// let parsed_ranges = http_range_header::parse_range_header(input)
 ///     // Is syntactically correct
 ///     .unwrap();
-/// let validated = parsed_ranges.validate(file_size_bytes);
-/// assert!(validated.is_err());
+/// let validated = parsed_ranges.validate(file_size_bytes).unwrap();
+/// assert_eq!(vec![0..=14], validated);
 /// ```
 ///
 /// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
@@ -277,16 +277,12 @@ impl ParsedRanges {
                 }
             };
             let end = match parsed.end {
-                EndPosition::Index(i) => i,
+                EndPosition::Index(i) => std::cmp::min(i, file_size_bytes - 1),
                 EndPosition::LastByte => file_size_bytes - 1,
             };
 
-            if end < file_size_bytes {
-                let valid = RangeInclusive::new(start, end);
-                validated.push(valid);
-            } else {
-                return invalid!("Range end exceedes EOF".to_string());
-            }
+            let valid = RangeInclusive::new(start, end);
+            validated.push(valid);
         }
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
@@ -534,12 +530,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_out_of_bounds_overrun_as_unsatisfiable() {
+    fn parse_out_of_bounds_overrun_as_content_length() {
         let input = &format!("bytes=0-{}", TEST_FILE_LENGTH);
-        let parsed = parse_range_header(input)
+        let expect = vec![RangeInclusive::new(0, TEST_FILE_LENGTH - 1)];
+        let actual = parse_range_header(input)
             .unwrap()
-            .validate(TEST_FILE_LENGTH);
-        assert!(parsed.is_err());
+            .validate(TEST_FILE_LENGTH)
+            .unwrap();
+        assert_eq!(expect, actual);
     }
 
     #[test]
