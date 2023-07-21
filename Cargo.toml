@@ -1,6 +1,6 @@
 [package]
 name = "http-range-header"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2018"
 license = "MIT"
 readme = "./README.md"
@@ -10,6 +10,7 @@ homepage = "https://github.com/MarcusGrass/parse-range-headers"
 categories = ["parser-implementations", "network-programming", "web-programming"]
 keywords = ["http", "parser", "http-headers", "headers", "range"]
 exclude = ["/.github", "CONTRIBUTING.md"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 with_error_cause = []
@@ -17,10 +18,10 @@ with_error_cause = []
 [dependencies]
 
 [dev-dependencies]
-criterion = "0.3.5"
+criterion = "0.5.1"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
-regex = "1.5.4"
+regex = "1.8.3"
 
 [[bench]]
 name = "benchmark"
