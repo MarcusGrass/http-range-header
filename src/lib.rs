@@ -1,13 +1,10 @@
 #![warn(clippy::pedantic)]
 use core::fmt::{Debug, Display, Formatter};
 use core::ops::RangeInclusive;
-use std::error::Error;
 
 #[macro_use]
 mod macros;
 
-const UNIT_SEP: &str = "bytes=";
-const COMMA: char = ',';
 /// Function that parses the content of a range header.
 ///
 /// Follows the [spec here](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range)
@@ -123,8 +120,9 @@ const COMMA: char = ',';
 pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
-    let mut ranges = Vec::new();
-    if let Some((prefix, indicated_range)) = split_exactly_once(range_header_value, UNIT_SEP) {
+    const UNIT_SEP: &str = "bytes=";
+    const COMMA: char = ',';
+    if let Some((prefix, indicated_range)) = range_header_value.split_once(UNIT_SEP) {
         if indicated_range.starts_with(char::is_whitespace) {
             return invalid!(format!(
                 "Range: {} is not acceptable, starts with whitespace",
@@ -137,32 +135,43 @@ pub fn parse_range_header(
                 range_header_value, UNIT_SEP,
             ));
         }
-        for range in indicated_range.split(COMMA) {
-            if let Some(trimmed) = trim(range) {
-                match parse_inner(trimmed) {
-                    Ok(parsed) => ranges.push(parsed),
-                    Err(e) => return Err(e),
+        let mut errs = vec![];
+        let ranges = indicated_range
+            .split(COMMA)
+            .filter_map(|range| {
+                if let Some(trimmed) = trim(range) {
+                    match parse_inner(trimmed) {
+                        Ok(parsed) => Some(parsed),
+                        Err(e) => {
+                            errs.push(Err(e));
+                            None
+                        }
+                    }
+                } else {
+                    errs.push(invalid!(format!(
+                        "Range: {} is not acceptable, range contains illegal whitespaces",
+                        range_header_value
+                    )));
+                    None
                 }
-            } else {
-                return invalid!(format!(
-                    "Range: {} is not acceptable, range contains illegal whitespaces",
-                    range_header_value
-                ));
-            }
+            })
+            .collect::<Vec<SyntacticallyCorrectRange>>();
+        if let Some(first_err) = errs.pop() {
+            return first_err;
+        }
+        if ranges.is_empty() {
+            invalid!(format!(
+                "Range: {} could not be parsed for an unknown reason, please file an issue",
+                range_header_value
+            ))
+        } else {
+            Ok(ParsedRanges::new(ranges))
         }
     } else {
-        return invalid!(format!(
+        invalid!(format!(
             "Range: {} is not acceptable, range does not start with '{}'",
             range_header_value, UNIT_SEP
-        ));
-    }
-    if ranges.is_empty() {
-        invalid!(format!(
-            "Range: {} could not be parsed for an unknown reason, please file an issue",
-            range_header_value
         ))
-    } else {
-        Ok(ParsedRanges::new(ranges))
     }
 }
 
@@ -176,7 +185,7 @@ fn trim(s: &str) -> Option<&str> {
 
 #[inline]
 fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfiableError> {
-    if let Some((start, end)) = split_exactly_once_ch(range, '-') {
+    if let Some((start, end)) = range.split_once('-') {
         if start.is_empty() {
             if let Some(end) = strict_parse_u64(end) {
                 if end == 0 {
@@ -228,25 +237,6 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
     None
 }
 
-fn split_exactly_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)> {
-    let mut iter = s.split(pat);
-    let left = iter.next()?;
-    let right = iter.next()?;
-    if iter.next().is_some() {
-        return None;
-    }
-    Some((left, right))
-}
-
-fn split_exactly_once_ch(s: &str, pat: char) -> Option<(&str, &str)> {
-    let mut iter = s.split(pat);
-    let left = iter.next()?;
-    let right = iter.next()?;
-    if iter.next().is_some() {
-        return None;
-    }
-    Some((left, right))
-}
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedRanges {
     ranges: Vec<SyntacticallyCorrectRange>,
@@ -326,7 +316,7 @@ impl Display for RangeUnsatisfiableError {
     }
 }
 
-impl Error for RangeUnsatisfiableError {}
+impl std::error::Error for RangeUnsatisfiableError {}
 
 enum RangeValidationResult {
     Valid,
@@ -385,7 +375,7 @@ mod tests {
     use crate::{
         parse_range_header, EndPosition, ParsedRanges, StartPosition, SyntacticallyCorrectRange,
     };
-    use std::ops::RangeInclusive;
+    use core::ops::RangeInclusive;
 
     const TEST_FILE_LENGTH: u64 = 10_000;
     /// Testing standard range compliance against https://datatracker.ietf.org/doc/html/rfc7233
