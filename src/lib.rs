@@ -1,17 +1,20 @@
+#![warn(clippy::pedantic)]
+use core::fmt::{Debug, Display, Formatter};
+use core::ops::RangeInclusive;
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
-use std::ops::RangeInclusive;
 
 #[macro_use]
 mod macros;
 
+const UNIT_SEP: &str = "bytes=";
+const COMMA: char = ',';
 /// Function that parses the content of a range header.
 ///
-/// Follows the spec here https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range
+/// Follows the [spec here](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range)
 ///
-/// And here https://www.ietf.org/rfc/rfc2616.txt
+/// And [here](https://www.ietf.org/rfc/rfc2616.txt)
 ///
-/// Will only accept bytes ranges, will update when https://www.iana.org/assignments/http-parameters/http-parameters.xhtml changes to allow other units.
+/// Will only accept bytes ranges, will update when [this spec](https://www.iana.org/assignments/http-parameters/http-parameters.xhtml) changes to allow other units.
 ///
 /// Parses ranges strictly, as in the examples contained in the above specifications.
 ///
@@ -80,11 +83,11 @@ mod macros;
 /// }
 /// ```
 ///
-/// The parser makes two passes, one without a known file_size, ensuring all ranges are syntactically correct.
+/// The parser makes two passes, one without a known file-size, ensuring all ranges are syntactically correct.
 /// The returned struct will through its `validate` method accept a file-size and figure out whether or not the
 /// syntactically correct ranges actually makes sense in context
 ///
-/// The range `bytes=0-20` on a file with 15 bytes will be accepted in the first pass as the content_size is unknown.
+/// The range `bytes=0-20` on a file with 15 bytes will be accepted in the first pass as the content size is unknown.
 /// On the second pass (`validate`) it will be truncated to `file_size - 1` as per [the spec](https://httpwg.org/specs/rfc9110.html#rfc.section.14.1.2).
 /// # Example range truncates in `validate` because it exceedes
 /// ```
@@ -100,7 +103,7 @@ mod macros;
 /// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
 /// will become two syntactically correct ranges, but `validate` will return ann `Err`.
 ///
-/// This is an opinionated implementation, the spec https://datatracker.ietf.org/doc/html/rfc7233
+/// This is an opinionated implementation, [the spec](https://datatracker.ietf.org/doc/html/rfc7233)
 /// allows a server to determine its implementation of overlapping ranges, this api currently does not allow it.
 ///
 /// # Example multipart-range fails `validate` because of an overlap
@@ -114,12 +117,9 @@ mod macros;
 /// // Some ranges overlap, all valid ranges get truncated to 1 Err
 /// assert!(validated.is_err());
 /// ```
-///
-///
-
-const UNIT_SEP: &str = "bytes=";
-const COMMA: char = ',';
-
+/// # Errors
+/// Will return an error if the `range_header_value` cannot be strictly parsed into a range
+/// per the http spec.
 pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
@@ -166,7 +166,7 @@ pub fn parse_range_header(
     }
 }
 
-fn trim<'a>(s: &'a str) -> Option<&'a str> {
+fn trim(s: &str) -> Option<&str> {
     if s.ends_with(char::is_whitespace) || s.match_indices(char::is_whitespace).count() > 1 {
         None
     } else {
@@ -181,12 +181,11 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
             if let Some(end) = strict_parse_u64(end) {
                 if end == 0 {
                     return invalid!(format!("Range: {} is not satisfiable, suffixed number of bytes to retrieve is zero.", range));
-                } else {
-                    return Ok(SyntacticallyCorrectRange::new(
-                        StartPosition::FromLast(end),
-                        EndPosition::LastByte,
-                    ));
                 }
+                return Ok(SyntacticallyCorrectRange::new(
+                    StartPosition::FromLast(end),
+                    EndPosition::LastByte,
+                ));
             }
             return invalid!(format!(
                 "Range: {} is not acceptable, end of range not parseable.",
@@ -223,8 +222,8 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
 }
 
 fn strict_parse_u64(s: &str) -> Option<u64> {
-    if !s.starts_with("+") && (s.len() == 1 || !s.starts_with("0")) {
-        return u64::from_str_radix(s, 10).ok();
+    if !s.starts_with('+') && (s.len() == 1 || !s.starts_with('0')) {
+        return s.parse::<u64>().ok();
     }
     None
 }
@@ -239,7 +238,7 @@ fn split_exactly_once<'a>(s: &'a str, pat: &'a str) -> Option<(&'a str, &'a str)
     Some((left, right))
 }
 
-fn split_exactly_once_ch<'a>(s: &'a str, pat: char) -> Option<(&'a str, &'a str)> {
+fn split_exactly_once_ch(s: &str, pat: char) -> Option<(&str, &str)> {
     let mut iter = s.split(pat);
     let left = iter.next()?;
     let right = iter.next()?;
@@ -258,6 +257,9 @@ impl ParsedRanges {
         ParsedRanges { ranges }
     }
 
+    /// Validates a parsed range for a given file-size in bytes.
+    /// # Errors
+    /// If the range is invalid for the the file-size.
     pub fn validate(
         &self,
         file_size_bytes: u64,
@@ -277,13 +279,15 @@ impl ParsedRanges {
                 }
             };
             let end = match parsed.end {
-                EndPosition::Index(i) => std::cmp::min(i, file_size_bytes - 1),
+                EndPosition::Index(i) => core::cmp::min(i, file_size_bytes - 1),
                 EndPosition::LastByte => file_size_bytes - 1,
             };
 
             let valid = RangeInclusive::new(start, end);
             validated.push(valid);
         }
+        // False positive
+        #[allow(clippy::match_same_arms)]
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
             RangeValidationResult::Overlapping => invalid!("Ranges overlap".to_string()),
@@ -310,7 +314,7 @@ impl RangeUnsatisfiableError {
 pub struct RangeUnsatisfiableError;
 
 impl Display for RangeUnsatisfiableError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         #[cfg(feature = "with_error_cause")]
         {
             f.write_str(&self.msg)
