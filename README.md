@@ -13,7 +13,7 @@ The main goals of this parser is:
 
 Secondary goals are:
 * Speed
-* Information on why the header was rejected (feature 'with_error_cause')
+* Information on why the header was rejected
 
 The parser is strict. Any range where all parts are not syntactically correct and makes sense in the context of the underlying 
 resource will be rejected.
