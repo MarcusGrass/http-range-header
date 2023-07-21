@@ -366,7 +366,10 @@ enum EndPosition {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_range_header, EndPosition, ParsedRanges, StartPosition, SyntacticallyCorrectRange, RangeUnsatisfiableError};
+    use crate::{
+        parse_range_header, EndPosition, ParsedRanges, RangeUnsatisfiableError, StartPosition,
+        SyntacticallyCorrectRange,
+    };
     use core::ops::RangeInclusive;
 
     const TEST_FILE_LENGTH: u64 = 10_000;
@@ -485,7 +488,10 @@ mod tests {
         let input = "bytes=";
         let parsed = parse_range_header(input);
         // 0 is unexpected
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes));
+        assert_eq!(
+            parsed,
+            Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
+        );
     }
 
     #[test]
@@ -580,7 +586,10 @@ mod tests {
     fn parse_single_reversed_as_invalid() {
         let input = &format!("bytes=15-0");
         let parsed = parse_range_header(input).unwrap();
-        assert_eq!(parsed.validate(TEST_FILE_LENGTH), Err(RangeUnsatisfiableError::RangeReversed));
+        assert_eq!(
+            parsed.validate(TEST_FILE_LENGTH),
+            Err(RangeUnsatisfiableError::RangeReversed)
+        );
     }
 
     #[test]
