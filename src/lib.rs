@@ -604,6 +604,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_zero_range_last_byte_valid_if_file_size_0() {
+        let input = "bytes=0-";
+        let expect = SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::LastByte);
+        let actual = parse_range_header(input).unwrap().ranges[0];
+        assert_eq!(actual, expect);
+    }
+
+    #[test]
+    fn parse_zero_range_closed_valid_if_file_size_0() {
+        let input = "bytes=0-0";
+        let expect = SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::Index(0));
+        let actual = parse_range_header(input).unwrap().ranges[0];
+        assert_eq!(actual, expect);
+    }
+
+    #[test]
     fn parse_multi_range() {
         let input = "bytes=0-1023, 2015-3000, 4000-4500, 8000-9999";
         let expected_ranges = vec![
