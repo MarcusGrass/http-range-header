@@ -234,12 +234,12 @@ impl ParsedRanges {
                     if i > file_size_bytes {
                         return Err(RangeUnsatisfiableError::FileSuffixOutOfBounds);
                     }
-                    file_size_bytes - i
+                    file_size_bytes.saturating_sub(i)
                 }
             };
             let end = match parsed.end {
-                EndPosition::Index(i) => core::cmp::min(i, file_size_bytes - 1),
-                EndPosition::LastByte => file_size_bytes - 1,
+                EndPosition::Index(i) => core::cmp::min(i, file_size_bytes.saturating_sub(1)),
+                EndPosition::LastByte => file_size_bytes.saturating_sub(1),
             };
 
             let valid = RangeInclusive::new(start, end);
@@ -588,6 +588,16 @@ mod tests {
         let parsed = parse_range_header(input).unwrap();
         assert_eq!(
             parsed.validate(TEST_FILE_LENGTH),
+            Err(RangeUnsatisfiableError::RangeReversed)
+        );
+    }
+
+    #[test]
+    fn parse_zero_range_as_invalid() {
+        let input = &format!("bytes=15-");
+        let parsed = parse_range_header(input).unwrap();
+        assert_eq!(
+            parsed.validate(0),
             Err(RangeUnsatisfiableError::RangeReversed)
         );
     }
