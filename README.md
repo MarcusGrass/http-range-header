@@ -17,3 +17,15 @@ Secondary goals are:
 
 The parser is strict. Any range where all parts are not syntactically correct and makes sense in the context of the underlying 
 resource will be rejected.
+
+## Dev release checklist
+
+1. Make sure CI passes
+2. Run [cargo fuzz](https://rust-fuzz.github.io/book/cargo-fuzz.html) 
+`cargo +nightly fuzz run random_string_input`, at least a minute should be good enough. If it doesn't 
+error out it has passed.
+3. Check msrv with for example [cargo msrv](https://github.com/foresterre/cargo-msrv),
+   if a higher msrv is wanted/needed, bump it so that it's less than or equal to [tower-http's](https://github.com/tower-rs/tower-http)
+4. Update changelog
+5. Update version
+6. Publish
