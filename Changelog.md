@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Fixed
 
+## [0.4.2] - 2024-11-28
+
+### Changed
+
+- Relaxed visibility of some intermediate-structs on from 
+parsing internals to public, see https://github.com/MarcusGrass/http-range-header/issues/9
+
 ## [0.4.1] - 2024-05-03
 
 ### Fixed
