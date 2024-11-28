@@ -211,7 +211,7 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedRanges {
-    ranges: Vec<SyntacticallyCorrectRange>,
+    pub ranges: Vec<SyntacticallyCorrectRange>,
 }
 
 impl ParsedRanges {
@@ -342,9 +342,9 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-struct SyntacticallyCorrectRange {
-    start: StartPosition,
-    end: EndPosition,
+pub struct SyntacticallyCorrectRange {
+    pub start: StartPosition,
+    pub end: EndPosition,
 }
 
 impl SyntacticallyCorrectRange {
@@ -354,13 +354,13 @@ impl SyntacticallyCorrectRange {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum StartPosition {
+pub enum StartPosition {
     Index(u64),
     FromLast(u64),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum EndPosition {
+pub enum EndPosition {
     Index(u64),
     LastByte,
 }
