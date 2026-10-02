@@ -232,9 +232,10 @@ impl ParsedRanges {
             let start = match parsed.start {
                 StartPosition::Index(i) => i,
                 StartPosition::FromLast(i) => {
-                    if i > file_size_bytes {
+                    if file_size_bytes == 0 {
                         return Err(RangeUnsatisfiableError::FileSuffixOutOfBounds);
                     }
+                    // RFC 9110 14.1.2: a suffix longer than the representation selects all of it
                     file_size_bytes.saturating_sub(i)
                 }
             };
@@ -568,11 +569,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_out_of_bounds_suffix_overrun_as_unsatisfiable() {
+    fn parse_suffix_longer_than_file_as_whole_file() {
         let input = &format!("bytes=-{}", TEST_FILE_LENGTH + 1);
         let parsed = parse_range_header(input)
             .unwrap()
-            .validate(TEST_FILE_LENGTH);
+            .validate(TEST_FILE_LENGTH)
+            .unwrap();
+        assert_eq!(parsed, vec![0..=TEST_FILE_LENGTH - 1]);
+    }
+
+    #[test]
+    fn parse_suffix_of_empty_file_as_unsatisfiable() {
+        let parsed = parse_range_header("bytes=-1").unwrap().validate(0);
         assert_eq!(parsed, Err(RangeUnsatisfiableError::FileSuffixOutOfBounds));
     }
 
