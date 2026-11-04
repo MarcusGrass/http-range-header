@@ -13,7 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
+- Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
+That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
+returned `Ok(vec![0..=0])` which would not properly index the given file.
+- Relaxed spec-compliant handling of unsatisfiable vs invalid ranges. Mixed-ranges with satisfiable and unsatisfiable
+ranges will return only the satisfiable ones, not an error.
 
 ## [0.4.2] - 2024-11-28
 

@@ -15,8 +15,9 @@ Secondary goals are:
 * Speed
 * Information on why the header was rejected
 
-The parser is strict. Any range where all parts are not syntactically correct and makes sense in the context of the underlying 
-resource will be rejected.
+The parser is strict. Any range where all parts are not syntactically correct is rejected.
+Invalid ranges produces an error.
+Unsatisfiable ranges are filtered out according to the spec.
 
 ## Dev release checklist
 

@@ -6,7 +6,6 @@ license = "MIT"
 readme = "./README.md"
 description = "No-dep range header parser"
 repository = "https://github.com/MarcusGrass/parse-range-headers"
-homepage = "https://github.com/MarcusGrass/parse-range-headers"
 categories = ["parser-implementations", "network-programming", "web-programming"]
 keywords = ["http", "parser", "http-headers", "headers", "range"]
 exclude = ["/.github", "CONTRIBUTING.md"]
