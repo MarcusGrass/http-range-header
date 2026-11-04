@@ -41,8 +41,8 @@ const UNIT_SEP: &str = "bytes=";
 /// ```
 /// // No negatives
 /// assert!(http_range_header::parse_range_header("bytes=-12-15").is_err());
-/// // No leading zeroes
-/// assert!(http_range_header::parse_range_header("bytes=00-15").is_err());
+/// // Leading zeroes are allowed
+/// assert!(http_range_header::parse_range_header("bytes=00-15").is_ok());
 /// // No plus sign
 /// assert!(http_range_header::parse_range_header("bytes=+0-15").is_err());
 /// ```
@@ -210,7 +210,8 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
 }
 
 fn strict_parse_u64(s: &str) -> Option<u64> {
-    if !s.starts_with('+') && (s.len() == 1 || !s.starts_with('0')) {
+    const MAX_U64_DIGITS: usize = 20;
+    if !s.starts_with('+') && s.len() <= MAX_U64_DIGITS {
         return s.parse::<u64>().ok();
     }
     None
@@ -928,6 +929,38 @@ mod tests {
         let _parsed = parse_range_header("bytes=0-0").unwrap();
         let _parsed = parse_range_header("Bytes=0-0").unwrap();
         let _parsed = parse_range_header("ByTeS=0-0").unwrap();
+    }
+
+    #[test]
+    fn accepts_leading_zeroes() {
+        // https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.1
+        // Spec only says one or more digits
+        let parsed = parse_range_header("bytes=1-2").unwrap();
+        assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=01-2").unwrap();
+        assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=001-2").unwrap();
+        assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=00001-2").unwrap();
+        assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
+    }
+
+    #[test]
+    fn rejects_long_number() {
+        // Guards against an infinite `0`'s string
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadEndOfRange),
+            parse_range_header("bytes=0-00000000000000000000000000000000000015")
+        );
+    }
+
+    #[test]
+    fn accepts_max_u64_value() {
+        let parsed = parse_range_header("bytes=0-18446744073709551615").unwrap();
+        assert_eq!(
+            Ok(vec![0..=TEST_FILE_LENGTH.saturating_sub(1)]),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
