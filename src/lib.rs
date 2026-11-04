@@ -128,7 +128,7 @@ pub fn parse_range_header(
             match range_header_value.get(UNIT_SEP.len()..) {
                 Some(r) => r,
                 None => {
-                    return Err(RangeUnsatisfiableError::Empty);
+                    return Err(RangeUnsatisfiableError::BadStartOfRange);
                 }
             }
         }
@@ -142,24 +142,31 @@ pub fn parse_range_header(
     }
     let mut last_err = None;
     let mut last_val = None;
-    let ranges = indicated_range
-        .split(COMMA)
-        .filter_map(|range| {
-            if let Some(trimmed) = trim(range) {
-                last_val = Some(range);
-                match parse_inner(trimmed) {
-                    Ok(parsed) => Some(parsed),
-                    Err(e) => {
-                        last_err = Some(e);
-                        None
-                    }
+    let mut num_empty = 0;
+    let mut ranges = Vec::new();
+    for range in indicated_range.split(COMMA) {
+        let val = if let Some(trimmed) = trim(range) {
+            if trimmed.is_empty() {
+                num_empty += 1;
+                if num_empty >= MAX_EMPTY {
+                    return Err(RangeUnsatisfiableError::TooManyEmptyRanges);
                 }
-            } else {
-                last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
-                None
+                continue;
             }
-        })
-        .collect::<Vec<SyntacticallyCorrectRange>>();
+            last_val = Some(range);
+            match parse_inner(trimmed) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    last_err = Some(e);
+                    continue;
+                }
+            }
+        } else {
+            last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
+            continue;
+        };
+        ranges.push(val);
+    }
     if let Some(last_err) = last_err {
         return Err(last_err);
     }
@@ -170,12 +177,18 @@ pub fn parse_range_header(
         Some(_) | None => {}
     }
     if ranges.is_empty() {
+        let trimmed_range = indicated_range.trim();
+        if trimmed_range.is_empty() || trimmed_range == "," {
+            return Err(RangeUnsatisfiableError::BadStartOfRange);
+        }
         // Some other error should have been caught before we end up here
         Err(RangeUnsatisfiableError::Empty)
     } else {
         Ok(ParsedRanges::new(ranges))
     }
 }
+
+const MAX_EMPTY: usize = 5;
 
 fn trim(s: &str) -> Option<&str> {
     let trimmed = s.trim_matches(space_or_tab);
@@ -370,6 +383,7 @@ pub enum RangeUnsatisfiableError {
     BadEndOfRange,
     UnexpectedNumberOfDashes,
     Empty,
+    TooManyEmptyRanges,
 }
 
 impl Display for RangeUnsatisfiableError {
@@ -408,6 +422,10 @@ impl Display for RangeUnsatisfiableError {
             RangeUnsatisfiableError::Empty => f.write_str(
                 "RangeUnsatisfiable: Failed to parse range fallback error, please file an issue",
             ),
+            RangeUnsatisfiableError::TooManyEmptyRanges => f.write_fmt(format_args!(
+                "RangeUnsatisfiable: Too many empty ranges (>={})",
+                MAX_EMPTY
+            )),
         }
     }
 }
@@ -590,10 +608,7 @@ mod tests {
         let input = "bytes=";
         let parsed = parse_range_header(input);
         // 0 is unexpected
-        assert_eq!(
-            parsed,
-            Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
-        );
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
     }
 
     #[test]
@@ -1012,6 +1027,38 @@ mod tests {
         assert_eq!(
             Ok(vec![0..=TEST_FILE_LENGTH.saturating_sub(1)]),
             parsed.validate(TEST_FILE_LENGTH)
+        );
+    }
+    #[test]
+    fn does_not_accept_a_completely_empty_range() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadStartOfRange),
+            parse_range_header("bytes=")
+        );
+    }
+
+    #[test]
+    fn accepts_a_few_empty_elements() {
+        let parsed = parse_range_header("bytes=0-1,,3-4,").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=,0-1,,3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1,,3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1 , , 3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1 ,, , 3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1 , , , 3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1 ,, ,, 3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=0-1 ,,,,, 3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
+
+        assert_eq!(
+            Err(RangeUnsatisfiableError::TooManyEmptyRanges),
+            parse_range_header("bytes=0-1,,,,,,3-4")
         );
     }
 

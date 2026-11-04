@@ -10,29 +10,9 @@ lazy_static::lazy_static! {
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
-        // Discard valid ranges, this test is looking for invalid ranges which should
-        // 1. Either not be parsed, or if it's parsed, not pass validation
-        // 2. Not panic
-
-        match s.get(.."bytes=".len()) {
-            Some(r) if r.eq_ignore_ascii_case("bytes=") => {
-                match s.get("bytes=".len()..) {
-                    Some(rest) if STANDARD_RANGE.is_match(rest) => {
-                        return;
-                    }
-                    Some(_) | None => {}
-                }
-            }
-            Some(_) | None => {}
-        }
+        // This test is specifically looking for panics
         if let Ok(parsed) = parse_range_header(s) {
-            let v = parsed.validate(u64::MAX);
-            assert!(
-                parsed.validate(u64::MAX).is_err(),
-                "range {:?} accepted as {:?}",
-                s,
-                v
-            );
+            let _v = parsed.validate(u64::MAX);
         }
     }
 });

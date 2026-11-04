@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
-
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
 - Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
@@ -26,6 +25,9 @@ E.g., this is okay: `Bytes=0-10`
 E.g., this is okay: `bytes=00-10`
 - Relaxed spec-compliant handling of whitespace. https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.3
 E.g., this is okay: `bytes=00-10 , 15-20`
+- Relaxed spec-compliant handling of empty ranges. https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2
+E.g., this is okay: `bytes=0-1 ,, , 3-4` and produces the ranges `0..=1` and `3..=4`
+Adds the new error kind `RangeUnsatisfiableError::TooManyEmptyRanges` (breaking)
 
 ## [0.4.2] - 2024-11-28
 
