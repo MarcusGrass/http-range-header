@@ -37,7 +37,7 @@ const UNIT_SEP: &str = "bytes=";
 /// assert!(http_range_header::parse_range_header("bytes=0-15,20-30").is_ok());
 /// ```
 ///
-/// # Example No negative values, no leading zeroes, no plus-sign
+/// # Example No negative values, no plus-sign
 /// ```
 /// // No negatives
 /// assert!(http_range_header::parse_range_header("bytes=-12-15").is_err());
@@ -45,6 +45,15 @@ const UNIT_SEP: &str = "bytes=";
 /// assert!(http_range_header::parse_range_header("bytes=00-15").is_ok());
 /// // No plus sign
 /// assert!(http_range_header::parse_range_header("bytes=+0-15").is_err());
+/// ```
+///
+/// # Example Max 30 digits in total
+/// The rule exists to prevent unbounded string searching:
+/// ```
+/// // u64::MAX and some extra is fine
+/// assert!(http_range_header::parse_range_header("bytes=00-0018446744073709551615").is_ok());
+/// // above 30 digits are rejected
+/// assert!(http_range_header::parse_range_header("bytes=00-000000000000000000000000000000000000000000000000000001").is_err());
 /// ```
 ///
 /// Makes two passes and parses ranges strictly. On the first pass, if any range is malformed returns an `Err`.
@@ -238,8 +247,8 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
 }
 
 fn strict_parse_u64(s: &str) -> Option<u64> {
-    const MAX_U64_DIGITS: usize = 20;
-    if !s.starts_with('+') && s.len() <= MAX_U64_DIGITS {
+    const MAX_DIGITS: usize = 30;
+    if !s.starts_with('+') && s.len() <= MAX_DIGITS {
         return s.parse::<u64>().ok();
     }
     None
@@ -1011,7 +1020,7 @@ mod tests {
         // Guards against an infinite `0`'s string
         assert_eq!(
             Err(RangeUnsatisfiableError::BadEndOfRange),
-            parse_range_header("bytes=0-00000000000000000000000000000000000015")
+            parse_range_header("bytes=0-00000000000000000000000000000000000000000000000000000000000000000000000015")
         );
     }
 

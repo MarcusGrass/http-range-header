@@ -10,13 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 ## [TBD] - Release date
 
+A lot of changes to match https://www.rfc-editor.org/rfc/rfc9110.html, that mainly means relaxing strictness.
+This has lead to a performance increase of on average around ~25% on the benchmarks.
+
+More valid expressions will now produce ranges. Unsatisfiable ranges will now cause an error if there are also 
+satisfiable ranges. Generally, the rule is: If there is at least one satisfiable range it's not an error. 
+Satisfiable ranges are filtered if they cannot properly index the file at the given validation length
+(Only applies to an empty file).
+
 ### Added
+- [BREAKING] new error kind `RangeUnsatisfiableError::TooManyEmptyRanges`
 ### Changed
-### Fixed
-- A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
 - Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
 returned `Err(FileSuffixOutOfBounds)`.
+### Fixed
+- A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
 - Relaxed spec-compliant handling of unsatisfiable vs invalid ranges. Mixed-ranges with satisfiable and unsatisfiable
 ranges will return only the satisfiable ones, not an error.
 - Relaxed spec-compliant handling of case sensitivity. https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1-4
@@ -27,7 +36,6 @@ E.g., this is okay: `bytes=00-10`
 E.g., this is okay: `bytes=00-10 , 15-20`
 - Relaxed spec-compliant handling of empty ranges. https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2
 E.g., this is okay: `bytes=0-1 ,, , 3-4` and produces the ranges `0..=1` and `3..=4`
-Adds the new error kind `RangeUnsatisfiableError::TooManyEmptyRanges` (breaking)
 
 ## [0.4.2] - 2024-11-28
 

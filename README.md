@@ -4,7 +4,8 @@
 [![CratesIo](https://shields.io/crates/v/http-range-header)](https://crates.io/crates/http-range-header)
 
 The main goals of this parser is:
-* Follow specification [RFC-2616](https://www.ietf.org/rfc/rfc2616.txt)
+* Follow specification [RFC-9110](https://www.rfc-editor.org/rfc/rfc9110.html)
+(previously followed the now obsolete [RFC-2616](https://www.ietf.org/rfc/rfc2616.txt))
 * Behave as expected [MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range)
 * Accuracy - parses headers strictly
 * Security - Never panics, ensured by fuzzing
