@@ -20,6 +20,7 @@ That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0
 returned `Ok(vec![0..=0])` which would not properly index the given file.
 - Relaxed spec-compliant handling of unsatisfiable vs invalid ranges. Mixed-ranges with satisfiable and unsatisfiable
 ranges will return only the satisfiable ones, not an error.
+- Relaxed spec-compliant handling of case sensitivity. https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1-4
 
 ## [0.4.2] - 2024-11-28
 

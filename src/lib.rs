@@ -120,42 +120,52 @@ pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
     const COMMA: char = ',';
-    if let Some((prefix, indicated_range)) = range_header_value.split_once(UNIT_SEP) {
-        if indicated_range.starts_with(char::is_whitespace) {
-            return Err(RangeUnsatisfiableError::StartsWithWhitespace);
+    let indicated_range = match range_header_value.get(..UNIT_SEP.len()) {
+        Some(r) => {
+            if !r.eq_ignore_ascii_case(UNIT_SEP) {
+                return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
+            }
+            match range_header_value.get(UNIT_SEP.len()..) {
+                Some(r) => r,
+                None => {
+                    return Err(RangeUnsatisfiableError::Empty);
+                }
+            }
         }
-        if !prefix.is_empty() {
+        None => {
             return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
         }
-        let mut last_err = None;
-        let ranges = indicated_range
-            .split(COMMA)
-            .filter_map(|range| {
-                if let Some(trimmed) = trim(range) {
-                    match parse_inner(trimmed) {
-                        Ok(parsed) => Some(parsed),
-                        Err(e) => {
-                            last_err = Some(e);
-                            None
-                        }
+    };
+
+    if indicated_range.starts_with(char::is_whitespace) {
+        return Err(RangeUnsatisfiableError::StartsWithWhitespace);
+    }
+    let mut last_err = None;
+    let ranges = indicated_range
+        .split(COMMA)
+        .filter_map(|range| {
+            if let Some(trimmed) = trim(range) {
+                match parse_inner(trimmed) {
+                    Ok(parsed) => Some(parsed),
+                    Err(e) => {
+                        last_err = Some(e);
+                        None
                     }
-                } else {
-                    last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
-                    None
                 }
-            })
-            .collect::<Vec<SyntacticallyCorrectRange>>();
-        if let Some(last_err) = last_err {
-            return Err(last_err);
-        }
-        if ranges.is_empty() {
-            // Some other error should have been caught before we end up here
-            Err(RangeUnsatisfiableError::Empty)
-        } else {
-            Ok(ParsedRanges::new(ranges))
-        }
+            } else {
+                last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
+                None
+            }
+        })
+        .collect::<Vec<SyntacticallyCorrectRange>>();
+    if let Some(last_err) = last_err {
+        return Err(last_err);
+    }
+    if ranges.is_empty() {
+        // Some other error should have been caught before we end up here
+        Err(RangeUnsatisfiableError::Empty)
     } else {
-        Err(RangeUnsatisfiableError::DoesNotStartWithToken)
+        Ok(ParsedRanges::new(ranges))
     }
 }
 
@@ -911,6 +921,13 @@ mod tests {
             Err(RangeUnsatisfiableError::RangeReversed),
             parsed.validate(0)
         );
+    }
+
+    #[test]
+    fn accepts_any_case() {
+        let _parsed = parse_range_header("bytes=0-0").unwrap();
+        let _parsed = parse_range_header("Bytes=0-0").unwrap();
+        let _parsed = parse_range_header("ByTeS=0-0").unwrap();
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
