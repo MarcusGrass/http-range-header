@@ -186,12 +186,7 @@ pub fn parse_range_header(
         Some(_) | None => {}
     }
     if ranges.is_empty() {
-        let trimmed_range = indicated_range.trim();
-        if trimmed_range.is_empty() || trimmed_range == "," {
-            return Err(RangeUnsatisfiableError::BadStartOfRange);
-        }
-        // Some other error should have been caught before we end up here
-        Err(RangeUnsatisfiableError::Empty)
+        Err(RangeUnsatisfiableError::BadStartOfRange)
     } else {
         Ok(ParsedRanges::new(ranges))
     }
@@ -391,7 +386,6 @@ pub enum RangeUnsatisfiableError {
     BadStartOfRange,
     BadEndOfRange,
     UnexpectedNumberOfDashes,
-    Empty,
     TooManyEmptyRanges,
 }
 
@@ -428,9 +422,6 @@ impl Display for RangeUnsatisfiableError {
             RangeUnsatisfiableError::UnexpectedNumberOfDashes => {
                 f.write_str("RangeUnsatisfiable: Unexpected number of dashes")
             }
-            RangeUnsatisfiableError::Empty => f.write_str(
-                "RangeUnsatisfiable: Failed to parse range fallback error, please file an issue",
-            ),
             RangeUnsatisfiableError::TooManyEmptyRanges => f.write_fmt(format_args!(
                 "RangeUnsatisfiable: Too many empty ranges (>={})",
                 MAX_EMPTY
@@ -1063,6 +1054,14 @@ mod tests {
             Err(RangeUnsatisfiableError::TooManyEmptyRanges),
             parse_range_header("bytes=0-1,,,,,,3-4")
         );
+    }
+
+    #[test]
+    fn regression_empty_err_on_only_comma() {
+        let parsed = parse_range_header("bytes=,,");
+        assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
+        let parsed = parse_range_header("bytes=,  ,");
+        assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {

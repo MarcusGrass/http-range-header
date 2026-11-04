@@ -24,6 +24,7 @@ Satisfiable ranges are filtered if they cannot properly index the file at the gi
 - Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
 returned `Err(FileSuffixOutOfBounds)`.
+- Removed the `Empty` error kind
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
 - Relaxed spec-compliant handling of unsatisfiable vs invalid ranges. Mixed-ranges with satisfiable and unsatisfiable
