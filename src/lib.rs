@@ -150,7 +150,6 @@ pub fn parse_range_header(
         return Err(RangeUnsatisfiableError::StartsWithWhitespace);
     }
     let mut last_err = None;
-    let mut last_val = None;
     let mut num_empty = 0;
     let mut ranges = Vec::new();
     for range in indicated_range.split(COMMA) {
@@ -162,7 +161,6 @@ pub fn parse_range_header(
                 }
                 continue;
             }
-            last_val = Some(range);
             match parse_inner(trimmed) {
                 Ok(parsed) => parsed,
                 Err(e) => {
@@ -179,11 +177,8 @@ pub fn parse_range_header(
     if let Some(last_err) = last_err {
         return Err(last_err);
     }
-    match last_val {
-        Some(v) if v.ends_with(space_or_tab) => {
-            return Err(RangeUnsatisfiableError::IllegalWhitespace);
-        }
-        Some(_) | None => {}
+    if indicated_range.ends_with(space_or_tab) {
+        return Err(RangeUnsatisfiableError::IllegalWhitespace);
     }
     if ranges.is_empty() {
         Err(RangeUnsatisfiableError::BadStartOfRange)
@@ -1062,6 +1057,13 @@ mod tests {
         assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
         let parsed = parse_range_header("bytes=,  ,");
         assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
+    }
+
+    #[test]
+    fn regression_disallowed_valid_white_spacing_allowed_invalid_white_spacing() {
+        let _parsed = parse_range_header("bytes=0-1 ,").unwrap();
+        let parsed = parse_range_header("bytes=0-1, ");
+        assert_eq!(Err(RangeUnsatisfiableError::IllegalWhitespace), parsed);
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
