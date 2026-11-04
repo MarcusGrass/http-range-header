@@ -187,7 +187,7 @@ pub fn parse_range_header(
     }
 }
 
-const MAX_EMPTY: usize = 5;
+const MAX_EMPTY: usize = 15;
 
 fn trim(s: &str) -> Option<&str> {
     let trimmed = s.trim_matches(space_or_tab);
@@ -1047,7 +1047,7 @@ mod tests {
 
         assert_eq!(
             Err(RangeUnsatisfiableError::TooManyEmptyRanges),
-            parse_range_header("bytes=0-1,,,,,,3-4")
+            parse_range_header("bytes=0-1,,,,,,,,,,,,,,,,,,3-4")
         );
     }
 
