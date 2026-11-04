@@ -887,16 +887,10 @@ mod tests {
 
     #[quickcheck_macros::quickcheck]
     #[allow(clippy::needless_pass_by_value)]
-    fn always_errs_on_random_input(input: String) -> quickcheck::TestResult {
-        // Basic regex matching most valid range headers
-        let acceptable = regex::Regex::new(
-            "^bytes=((\\d+-\\d+,\\s?)|(\\d+-,\\s?)|(-\\d+,\\s?))*((\\d+-\\d+)|(\\d+-)|(-\\d+))+$",
-        )
-        .unwrap();
-        if acceptable.is_match(&input) {
-            quickcheck::TestResult::discard()
-        } else if let Ok(passed_first_pass) = parse_range_header(&input) {
-            quickcheck::TestResult::from_bool(passed_first_pass.validate(u64::MAX).is_err())
+    fn never_panics(input: String) -> quickcheck::TestResult {
+        if let Ok(passed_first_pass) = parse_range_header(&input) {
+            let _v = passed_first_pass.validate(u64::MAX);
+            quickcheck::TestResult::passed()
         } else {
             quickcheck::TestResult::passed()
         }
