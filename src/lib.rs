@@ -141,10 +141,12 @@ pub fn parse_range_header(
         return Err(RangeUnsatisfiableError::StartsWithWhitespace);
     }
     let mut last_err = None;
+    let mut last_val = None;
     let ranges = indicated_range
         .split(COMMA)
         .filter_map(|range| {
             if let Some(trimmed) = trim(range) {
+                last_val = Some(range);
                 match parse_inner(trimmed) {
                     Ok(parsed) => Some(parsed),
                     Err(e) => {
@@ -161,6 +163,12 @@ pub fn parse_range_header(
     if let Some(last_err) = last_err {
         return Err(last_err);
     }
+    match last_val {
+        Some(v) if v.ends_with(space_or_tab) => {
+            return Err(RangeUnsatisfiableError::IllegalWhitespace);
+        }
+        Some(_) | None => {}
+    }
     if ranges.is_empty() {
         // Some other error should have been caught before we end up here
         Err(RangeUnsatisfiableError::Empty)
@@ -170,11 +178,18 @@ pub fn parse_range_header(
 }
 
 fn trim(s: &str) -> Option<&str> {
-    if s.ends_with(char::is_whitespace) || s.match_indices(char::is_whitespace).count() > 1 {
+    let trimmed = s.trim_matches(space_or_tab);
+    if trimmed.starts_with(|ch: char| ch.is_whitespace())
+        || trimmed.ends_with(|ch: char| ch.is_whitespace())
+    {
         None
     } else {
         Some(s.trim())
     }
+}
+
+fn space_or_tab(ch: char) -> bool {
+    ch == ' ' || ch == '\t'
 }
 
 #[inline]
@@ -943,6 +958,43 @@ mod tests {
         assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
         let parsed = parse_range_header("bytes=00001-2").unwrap();
         assert_eq!(Ok(vec![1..=2]), parsed.validate(TEST_FILE_LENGTH));
+    }
+
+    #[test]
+    fn accepts_whitespace_around_separators() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::IllegalWhitespace),
+            parse_range_header("bytes=1-2 ")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::StartsWithWhitespace),
+            parse_range_header("bytes= 1-2")
+        );
+        parse_range_header("bytes=0-1,3-4").unwrap();
+        parse_range_header("bytes=0-1, 3-4").unwrap();
+        parse_range_header("bytes=0-1,  3-4").unwrap();
+        parse_range_header("bytes=0-1 , 3-4").unwrap();
+        parse_range_header("bytes=0-1  ,3-4").unwrap();
+        parse_range_header("bytes=0-1,\t3-4").unwrap();
+        parse_range_header("bytes=0-1,\t\t3-4").unwrap();
+        parse_range_header("bytes=0-1 ,\t3-4").unwrap();
+        parse_range_header("bytes=0-1 \t,3-4").unwrap();
+        assert_eq!(
+            Err(RangeUnsatisfiableError::IllegalWhitespace),
+            parse_range_header("bytes=0-1,\n3-4")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::IllegalWhitespace),
+            parse_range_header("bytes=0-1,\n 3-4")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::IllegalWhitespace),
+            parse_range_header("bytes=0-1\n, 3-4")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::IllegalWhitespace),
+            parse_range_header("bytes=0-1,3-4\n")
+        );
     }
 
     #[test]
