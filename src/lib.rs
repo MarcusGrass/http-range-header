@@ -204,7 +204,13 @@ pub fn parse_range_header_with_max_ranges(
         return Err(last_err);
     }
     if indicated_range.ends_with(space_or_tab) {
-        return Err(RangeUnsatisfiableError::IllegalWhitespace);
+        // Having a final empty group with whitespace is allowed
+        if !indicated_range
+            .trim_end_matches(space_or_tab)
+            .ends_with(',')
+        {
+            return Err(RangeUnsatisfiableError::IllegalWhitespace);
+        }
     }
     if ranges.is_empty() {
         Err(RangeUnsatisfiableError::BadRange)
@@ -1140,8 +1146,11 @@ mod tests {
     #[test]
     fn regression_disallowed_valid_white_spacing_allowed_invalid_white_spacing() {
         let _parsed = parse_range_header("bytes=0-1 ,").unwrap();
-        let parsed = parse_range_header("bytes=0-1, ");
+        // No trailing whitespace
+        let parsed = parse_range_header("bytes=0-1 ");
         assert_eq!(Err(RangeUnsatisfiableError::IllegalWhitespace), parsed);
+        // An empty group is allowed
+        let _parsed = parse_range_header("bytes=0-1, ").unwrap();
     }
 
     #[test]
