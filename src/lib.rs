@@ -2,6 +2,7 @@
 #![allow(clippy::uninlined_format_args, clippy::single_range_in_vec_init)]
 use core::fmt::{Debug, Display, Formatter};
 use core::ops::RangeInclusive;
+use std::num::IntErrorKind;
 
 const UNIT_SEP: &str = "bytes=";
 /// Function that parses the content of a range header.
@@ -239,7 +240,15 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
 fn strict_parse_u64(s: &str) -> Option<u64> {
     const MAX_DIGITS: usize = 30;
     if !s.starts_with('+') && s.len() <= MAX_DIGITS {
-        return s.parse::<u64>().ok();
+        return match s.parse::<u64>() {
+            Ok(o) => Some(o),
+            Err(e) if e.kind() == &IntErrorKind::PosOverflow => {
+                // We're relying on the file not actually being larger than u64::MAX
+                // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
+                Some(u64::MAX)
+            }
+            Err(_) => None,
+        };
     }
     None
 }
@@ -1064,6 +1073,12 @@ mod tests {
         let _parsed = parse_range_header("bytes=0-1 ,").unwrap();
         let parsed = parse_range_header("bytes=0-1, ");
         assert_eq!(Err(RangeUnsatisfiableError::IllegalWhitespace), parsed);
+    }
+
+    #[test]
+    fn regression_u64_overflow_clamps_to_end_of_file() {
+        let parsed = parse_range_header("bytes=0-18446744073709551615000000000").unwrap();
+        assert_eq!(Ok(vec![0..=9999]), parsed.validate(TEST_FILE_LENGTH));
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
