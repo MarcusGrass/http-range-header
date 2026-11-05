@@ -2,7 +2,7 @@
 #![allow(clippy::uninlined_format_args, clippy::single_range_in_vec_init)]
 use core::fmt::{Debug, Display, Formatter};
 use core::ops::RangeInclusive;
-use std::num::IntErrorKind;
+use std::num::{IntErrorKind, NonZeroUsize};
 
 const UNIT_SEP: &str = "bytes=";
 /// Function that parses the content of a range header.
@@ -19,6 +19,9 @@ const UNIT_SEP: &str = "bytes=";
 ///
 /// It preserves the range ordering, the specification leaves it open to the server to determine whether
 /// ranges that are out of order are correct or not, ie `bytes=20-30, 0-15`
+///
+/// Allows a maximum of `100` ranges per request to limit DoS-risk, if more ranges are desired
+/// use [`parse_range_header_with_max_ranges`].
 ///
 /// # Example no trailing or leading whitespaces
 /// ```
@@ -134,8 +137,22 @@ const UNIT_SEP: &str = "bytes=";
 /// # Errors
 /// Will return an error if the `range_header_value` cannot be strictly parsed into a range
 /// per the http spec.
+#[allow(clippy::missing_panics_doc)]
 pub fn parse_range_header(
     range_header_value: &str,
+) -> Result<ParsedRanges, RangeUnsatisfiableError> {
+    // Picked somewhat arbitrarily, on my bench machine this comes in at sub 2 micros.
+    // A value that should be async-safe based on: <https://ryhl.io/blog/async-what-is-blocking/>
+    parse_range_header_with_max_ranges(range_header_value, NonZeroUsize::new(100).unwrap())
+}
+
+/// Like [`parse_range_header`] with a configurable maximum amount of acceptable ranges
+/// in a single header value.
+/// # Errors
+/// Same as [`parse_range_header`]
+pub fn parse_range_header_with_max_ranges(
+    range_header_value: &str,
+    max_ranges: NonZeroUsize,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
     const COMMA: char = ',';
     let indicated_range = match range_header_value.get(..UNIT_SEP.len()) {
@@ -183,6 +200,9 @@ pub fn parse_range_header(
             continue;
         };
         ranges.push(val);
+        if ranges.len() > max_ranges.get() {
+            return Err(RangeUnsatisfiableError::TooManyRanges);
+        }
     }
     if let Some(last_err) = last_err {
         return Err(last_err);
@@ -396,6 +416,7 @@ pub enum RangeUnsatisfiableError {
     DoesNotStartWithToken,
     BadRange,
     TooManyEmptyRanges,
+    TooManyRanges,
 }
 
 impl Display for RangeUnsatisfiableError {
@@ -423,6 +444,9 @@ impl Display for RangeUnsatisfiableError {
                 "RangeUnsatisfiable: Too many empty ranges (>={})",
                 MAX_EMPTY
             )),
+            RangeUnsatisfiableError::TooManyRanges => {
+                f.write_str("RangeUnsatisfiable: Too many ranges")
+            }
         }
     }
 }
@@ -436,30 +460,52 @@ enum RangeValidationResult {
 }
 
 fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
-    let mut bounds = Vec::new();
+    let mut sorted = true;
+    let mut prev_start = 0;
     for range in ranges {
-        let start = range.start();
-        let end = range.end();
+        let (start, end) = (*range.start(), *range.end());
         if start > end {
             return RangeValidationResult::Reversed;
-        } else if ranges.len() == 1 {
-            return RangeValidationResult::Valid;
         }
-        bounds.push((range.start(), range.end()));
+        sorted &= prev_start <= start;
+        prev_start = start;
     }
-    let mut num_overlapping = 0;
-    for i in 0..bounds.len() {
-        for j in i + 1..bounds.len() {
-            if bounds[i].0 <= bounds[j].1 && bounds[j].0 <= bounds[i].1 {
-                if num_overlapping == 0 {
-                    num_overlapping += 1;
-                } else {
-                    return RangeValidationResult::Overlapping;
-                }
+    if ranges.len() == 1 {
+        return RangeValidationResult::Valid;
+    }
+    let bounds = ranges.iter().map(|r| (*r.start(), *r.end()));
+    let too_many = if sorted {
+        has_multiple_overlaps(bounds)
+    } else {
+        let mut by_start: Vec<_> = bounds.collect();
+        by_start.sort_unstable_by_key(|&(start, _)| start);
+        has_multiple_overlaps(by_start.into_iter())
+    };
+    if too_many {
+        RangeValidationResult::Overlapping
+    } else {
+        RangeValidationResult::Valid
+    }
+}
+
+fn has_multiple_overlaps(mut by_start: impl Iterator<Item = (u64, u64)>) -> bool {
+    // MSRV
+    #[allow(clippy::manual_let_else)]
+    let mut max_end = match by_start.next() {
+        Some((_, end)) => end,
+        None => return false,
+    };
+    let mut seen_overlap = false;
+    for (start, end) in by_start {
+        if start <= max_end {
+            if seen_overlap {
+                return true;
             }
+            seen_overlap = true;
         }
+        max_end = max_end.max(end);
     }
-    RangeValidationResult::Valid
+    false
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -489,10 +535,12 @@ pub enum EndPosition {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parse_range_header, EndPosition, ParsedRanges, RangeUnsatisfiableError, StartPosition,
-        SyntacticallyCorrectRange,
+        parse_range_header, parse_range_header_with_max_ranges, EndPosition, ParsedRanges,
+        RangeUnsatisfiableError, StartPosition, SyntacticallyCorrectRange,
     };
     use core::ops::RangeInclusive;
+    use std::fmt::Write;
+    use std::num::NonZeroUsize;
 
     const TEST_FILE_LENGTH: u64 = 10_000;
     /// Testing standard range compliance against <https://datatracker.ietf.org/doc/html/rfc7233>
@@ -1167,6 +1215,43 @@ mod tests {
         assert_eq!(
             Err(RangeUnsatisfiableError::StartsWithWhitespace),
             parse_range_header("bytes= 0-999, 4500-5499, -1000")
+        );
+    }
+
+    #[test]
+    fn default_100_ranges() {
+        let mut spec = "bytes=".to_string();
+        let cases = 200;
+        for i in (0..cases).rev().step_by(2) {
+            let start = i;
+            let end = i + 1;
+            spec.write_fmt(format_args!("{}-{},", start, end)).unwrap();
+        }
+        spec.pop();
+        assert!(parse_range_header(&spec).is_ok());
+        let mut spec = "bytes=".to_string();
+        let cases = 201;
+        for i in (0..cases).rev().step_by(2) {
+            let start = i;
+            let end = i + 1;
+            spec.write_fmt(format_args!("{}-{},", start, end)).unwrap();
+        }
+        spec.pop();
+
+        assert_eq!(
+            Err(RangeUnsatisfiableError::TooManyRanges),
+            parse_range_header(&spec)
+        );
+    }
+
+    #[test]
+    fn configurable_ranges() {
+        assert!(
+            parse_range_header_with_max_ranges("bytes=1-2", NonZeroUsize::new(1).unwrap()).is_ok()
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::TooManyRanges),
+            parse_range_header_with_max_ranges("bytes=1-2,2-3", NonZeroUsize::new(1).unwrap())
         );
     }
 

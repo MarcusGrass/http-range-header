@@ -20,7 +20,10 @@ Satisfiable ranges are filtered if they cannot properly index the file at the gi
 (Only applies to an empty file).
 
 ### Added
+
 - [BREAKING] new error kind `RangeUnsatisfiableError::TooManyEmptyRanges`
+- `parse_range_header_with_max_ranges` that accepts a configurable number of ranges, for when 100 just isn't enough.
+
 ### Changed
 - Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
@@ -31,6 +34,7 @@ returned `Err(FileSuffixOutOfBounds)`.
 - clamps values above u64::MAX
 - at most 30 digits per range value
 - two ranges may now overlap, but no more than two <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-6>
+- `parse_range_header` will by default reject more than 100 ranges in a single input.
 
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
