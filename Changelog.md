@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A lot of changes to match https://www.rfc-editor.org/rfc/rfc9110.html, that mainly means relaxing strictness.
 This has lead to a performance increase of on average around ~25% on the benchmarks.
 
-More valid expressions will now produce ranges. Unsatisfiable ranges will now cause an error if there are also 
+More valid expressions will now produce ranges. Unsatisfiable ranges will no longer cause an error if there are also 
 satisfiable ranges. Generally, the rule is: If there is at least one satisfiable range it's not an error. 
 Satisfiable ranges are filtered if they cannot properly index the file at the given validation length
 (Only applies to an empty file).
@@ -25,13 +25,17 @@ Satisfiable ranges are filtered if they cannot properly index the file at the gi
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
 returned `Err(FileSuffixOutOfBounds)`.
 - Removed the `Empty` error kind
+- `parse_range_header` with `bytes=-0` will now succeed, but `validate` will fail instead.
+- `bytes=` now returns `BadStartOfRange`
+- Error enum collapsed, range errors such as `ZeroSuffix`, `BadStartOfRange`, etc. are now `BadRange`
+
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.
 - Relaxed spec-compliant handling of unsatisfiable vs invalid ranges. Mixed-ranges with satisfiable and unsatisfiable
 ranges will return only the satisfiable ones, not an error.
 - Relaxed spec-compliant handling of case sensitivity. https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1-4
 E.g., this is okay: `Bytes=0-10`
-- Relaxed spec-compliant handling of loading zeroes. https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.1
+- Relaxed spec-compliant handling of leading zeroes. https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.1
 E.g., this is okay: `bytes=00-10`
 - Relaxed spec-compliant handling of whitespace. https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.3
 E.g., this is okay: `bytes=00-10 , 15-20`

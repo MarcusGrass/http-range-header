@@ -9,7 +9,7 @@ const UNIT_SEP: &str = "bytes=";
 ///
 /// Follows the [spec here](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range)
 ///
-/// And [here](https://www.ietf.org/rfc/rfc2616.txt)
+/// And [RFC-9110 here](https://www.rfc-editor.org/rfc/rfc9110.html)
 ///
 /// Will only accept byte-ranges, will update when [this spec](https://www.iana.org/assignments/http-parameters/http-parameters.xhtml) changes to allow other units.
 ///
@@ -48,7 +48,7 @@ const UNIT_SEP: &str = "bytes=";
 /// assert!(http_range_header::parse_range_header("bytes=+0-15").is_err());
 /// ```
 ///
-/// # Example Max 30 digits in total
+/// # Example Max 30 digits per position
 /// The rule exists to prevent unbounded string searching:
 /// ```
 /// // u64::MAX and some extra is fine
@@ -138,7 +138,7 @@ pub fn parse_range_header(
             match range_header_value.get(UNIT_SEP.len()..) {
                 Some(r) => r,
                 None => {
-                    return Err(RangeUnsatisfiableError::BadStartOfRange);
+                    return Err(RangeUnsatisfiableError::BadRange);
                 }
             }
         }
@@ -182,7 +182,7 @@ pub fn parse_range_header(
         return Err(RangeUnsatisfiableError::IllegalWhitespace);
     }
     if ranges.is_empty() {
-        Err(RangeUnsatisfiableError::BadStartOfRange)
+        Err(RangeUnsatisfiableError::BadRange)
     } else {
         Ok(ParsedRanges::new(ranges))
     }
@@ -215,7 +215,7 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
                     EndPosition::LastByte,
                 ));
             }
-            return Err(RangeUnsatisfiableError::BadEndOfRange);
+            return Err(RangeUnsatisfiableError::BadRange);
         }
         if let Some(start) = strict_parse_u64(start) {
             if end.is_empty() {
@@ -230,9 +230,8 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
                     EndPosition::Index(end),
                 ));
             }
-            return Err(RangeUnsatisfiableError::BadEndOfRange);
         }
-        return Err(RangeUnsatisfiableError::BadStartOfRange);
+        return Err(RangeUnsatisfiableError::BadRange);
     }
     Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
 }
@@ -266,7 +265,7 @@ impl ParsedRanges {
     /// Validates a parsed range for a given file-size in bytes.
     /// Can return an empty vector if no ranges are usable.
     /// # Errors
-    /// If the range is invalid for the file-size.
+    /// If all ranges are unsatisfiable
     pub fn validate(
         &self,
         file_size_bytes: u64,
@@ -279,7 +278,7 @@ impl ParsedRanges {
             };
         }
         let mut validated = Vec::with_capacity(len);
-        let mut last_error = None;
+        let mut bad_range = false;
         for parsed in &self.ranges {
             let start = match parsed.start {
                 StartPosition::Index(i) => {
@@ -289,7 +288,7 @@ impl ParsedRanges {
                                 return Err(RangeUnsatisfiableError::RangeReversed);
                             }
                             _ => {
-                                last_error = Some(RangeUnsatisfiableError::BadStartOfRange);
+                                bad_range = true;
                                 continue;
                             }
                         }
@@ -298,7 +297,7 @@ impl ParsedRanges {
                 }
                 StartPosition::FromLast(i) => {
                     if i == 0 {
-                        last_error = Some(RangeUnsatisfiableError::ZeroSuffix);
+                        bad_range = true;
                         continue;
                     }
                     // RFC 9110 14.1.2: a suffix longer than the representation selects all of it
@@ -316,8 +315,8 @@ impl ParsedRanges {
 
         // MSRV preserving
         #[allow(clippy::single_match)]
-        match (validated.is_empty(), last_error) {
-            (true, Some(err)) => return Err(err),
+        match (validated.is_empty(), bad_range) {
+            (true, true) => return Err(RangeUnsatisfiableError::BadRange),
             _ => {}
         }
         match validate_ranges(validated.as_slice()) {
@@ -336,7 +335,7 @@ impl ParsedRanges {
             let start = match parsed.start {
                 // There is no valid starting value for a zero-length representation
                 StartPosition::Index(i) => {
-                    range_error = Some(RangeUnsatisfiableError::BadStartOfRange);
+                    range_error = Some(RangeUnsatisfiableError::BadRange);
                     i
                 }
                 StartPosition::FromLast(i) => {
@@ -348,14 +347,14 @@ impl ParsedRanges {
                         // This is unsatisfiable, but not invalid, so it doesn't cause an immediate
                         // exit. This is mostly pedantics since it's an empty file, any other ranges
                         // will not produce a particularly interesting result even if we continue.
-                        range_error = Some(RangeUnsatisfiableError::ZeroSuffix);
+                        range_error = Some(RangeUnsatisfiableError::BadRange);
                     }
                     0
                 }
             };
             let end = match parsed.end {
                 EndPosition::Index(i) => {
-                    range_error = Some(RangeUnsatisfiableError::BadEndOfRange);
+                    range_error = Some(RangeUnsatisfiableError::BadRange);
                     Some(i)
                 }
                 EndPosition::LastByte => None,
@@ -382,13 +381,10 @@ impl ParsedRanges {
 pub enum RangeUnsatisfiableError {
     OverlappingRanges,
     RangeReversed,
-    FileSuffixOutOfBounds,
     IllegalWhitespace,
     StartsWithWhitespace,
     DoesNotStartWithToken,
-    ZeroSuffix,
-    BadStartOfRange,
-    BadEndOfRange,
+    BadRange,
     UnexpectedNumberOfDashes,
     TooManyEmptyRanges,
 }
@@ -402,9 +398,6 @@ impl Display for RangeUnsatisfiableError {
             RangeUnsatisfiableError::RangeReversed => {
                 f.write_str("RangeUnsatisfiable: Reversed range")
             }
-            RangeUnsatisfiableError::FileSuffixOutOfBounds => f.write_str(
-                "RangeUnsatisfiable: File suffix out of bounds (larger than file bytes)",
-            ),
             RangeUnsatisfiableError::IllegalWhitespace => {
                 f.write_str("RangeUnsatisfiable: Illegal whitespaces in range")
             }
@@ -414,14 +407,8 @@ impl Display for RangeUnsatisfiableError {
             RangeUnsatisfiableError::DoesNotStartWithToken => f.write_fmt(format_args!(
                 "RangeUnsatisfiable: Range does not start with token '{UNIT_SEP}'"
             )),
-            RangeUnsatisfiableError::ZeroSuffix => {
-                f.write_str("RangeUnsatisfiable: Range ends at 0")
-            }
-            RangeUnsatisfiableError::BadStartOfRange => {
-                f.write_str("RangeUnsatisfiable: Unparseable start of range")
-            }
-            RangeUnsatisfiableError::BadEndOfRange => {
-                f.write_str("RangeUnsatisfiable: Unparseable end of range")
+            RangeUnsatisfiableError::BadRange => {
+                f.write_str("RangeUnsatisfiable: The supplied range is not valid")
             }
             RangeUnsatisfiableError::UnexpectedNumberOfDashes => {
                 f.write_str("RangeUnsatisfiable: Unexpected number of dashes")
@@ -612,7 +599,7 @@ mod tests {
         let input = "bytes=";
         let parsed = parse_range_header(input);
         // 0 is unexpected
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -636,7 +623,7 @@ mod tests {
         let input = "bytes=+0-15";
         let parsed = parse_range_header(input);
         // 0 is unexpected
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -657,7 +644,7 @@ mod tests {
     fn parse_negative_bad_characters_in_range_as_malformed() {
         let input = "bytes=1-10a";
         let parsed = parse_range_header(input);
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadEndOfRange));
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -665,7 +652,7 @@ mod tests {
         let input = "bytes=-1-10";
         let parsed = parse_range_header(input);
         // Becomes bad eor, since -1 signals suffixed range
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadEndOfRange));
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -673,7 +660,7 @@ mod tests {
         let input = "bytes=a1-10";
         let parsed = parse_range_header(input);
         // Becomes bad eor, since -1 signals suffixed range
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadStartOfRange));
+        assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -709,7 +696,7 @@ mod tests {
         let parsed = parse_range_header(input).unwrap();
         assert_eq!(
             parsed.validate(TEST_FILE_LENGTH),
-            Err(RangeUnsatisfiableError::ZeroSuffix)
+            Err(RangeUnsatisfiableError::BadRange)
         );
     }
 
@@ -766,10 +753,7 @@ mod tests {
     fn parse_zero_range_as_invalid() {
         let input = "bytes=15-";
         let parsed = parse_range_header(input).unwrap();
-        assert_eq!(
-            parsed.validate(0),
-            Err(RangeUnsatisfiableError::BadStartOfRange)
-        );
+        assert_eq!(parsed.validate(0), Err(RangeUnsatisfiableError::BadRange));
     }
 
     #[test]
@@ -918,20 +902,11 @@ mod tests {
     #[test]
     fn zero_length_file_does_not_accept_any_staring_range() {
         let parsed = parse_range_header("bytes=0-").unwrap();
-        assert_eq!(
-            Err(RangeUnsatisfiableError::BadStartOfRange),
-            parsed.validate(0)
-        );
+        assert_eq!(Err(RangeUnsatisfiableError::BadRange), parsed.validate(0));
         let parsed = parse_range_header("bytes=0-0").unwrap();
-        assert_eq!(
-            Err(RangeUnsatisfiableError::BadEndOfRange),
-            parsed.validate(0)
-        );
+        assert_eq!(Err(RangeUnsatisfiableError::BadRange), parsed.validate(0));
         let parsed = parse_range_header("bytes=0-100").unwrap();
-        assert_eq!(
-            Err(RangeUnsatisfiableError::BadEndOfRange),
-            parsed.validate(0)
-        );
+        assert_eq!(Err(RangeUnsatisfiableError::BadRange), parsed.validate(0));
     }
 
     #[test]
@@ -1014,7 +989,7 @@ mod tests {
     fn rejects_long_number() {
         // Guards against an infinite `0`'s string
         assert_eq!(
-            Err(RangeUnsatisfiableError::BadEndOfRange),
+            Err(RangeUnsatisfiableError::BadRange),
             parse_range_header("bytes=0-00000000000000000000000000000000000000000000000000000000000000000000000015")
         );
     }
@@ -1030,7 +1005,7 @@ mod tests {
     #[test]
     fn does_not_accept_a_completely_empty_range() {
         assert_eq!(
-            Err(RangeUnsatisfiableError::BadStartOfRange),
+            Err(RangeUnsatisfiableError::BadRange),
             parse_range_header("bytes=")
         );
     }
@@ -1063,9 +1038,9 @@ mod tests {
     #[test]
     fn regression_empty_err_on_only_comma() {
         let parsed = parse_range_header("bytes=,,");
-        assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
+        assert_eq!(Err(RangeUnsatisfiableError::BadRange), parsed);
         let parsed = parse_range_header("bytes=,  ,");
-        assert_eq!(Err(RangeUnsatisfiableError::BadStartOfRange), parsed);
+        assert_eq!(Err(RangeUnsatisfiableError::BadRange), parsed);
     }
 
     #[test]
