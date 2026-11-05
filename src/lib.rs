@@ -110,7 +110,8 @@ const UNIT_SEP: &str = "bytes=";
 /// ```
 ///
 /// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
-/// will become two syntactically correct ranges, but `validate` will return ann `Err`.
+/// will become two syntactically correct overlapping ranges. However, `bytes=0-20, 5-10, 12-13`
+/// will be rejected on `validate`.
 ///
 /// This is an opinionated implementation, [the spec](https://www.rfc-editor.org/rfc/rfc9110.html)
 /// allows a server to determine its implementation of more than two overlapping ranges,
@@ -300,7 +301,7 @@ impl ParsedRanges {
     /// Validates a parsed range for a given file-size in bytes.
     /// Can return an empty vector if no ranges are usable.
     /// # Errors
-    /// If all ranges are unsatisfiable or invalid
+    /// If all ranges are unsatisfiable or any range breaks spec
     pub fn validate(
         &self,
         file_size_bytes: u64,
@@ -655,7 +656,6 @@ mod tests {
     fn parse_empty_range_as_invalid() {
         let input = "bytes=";
         let parsed = parse_range_header(input);
-        // 0 is unexpected
         assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 
@@ -663,7 +663,6 @@ mod tests {
     fn parse_range_starting_with_whitespace_is_valid() {
         let input = "bytes= 0-15";
         let parsed = parse_range_header(input);
-        // 0 is unexpected
         assert_eq!(Ok(vec![0..=15]), parsed.unwrap().validate(TEST_FILE_LENGTH));
     }
 
