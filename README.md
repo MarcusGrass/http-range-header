@@ -18,7 +18,6 @@ Secondary goals are:
 
 The parser is strict. Any range where all parts are not syntactically correct is rejected.
 Invalid ranges produces an error.
-Unsatisfiable ranges are filtered out according to the spec.
 
 ## Dev release checklist
 

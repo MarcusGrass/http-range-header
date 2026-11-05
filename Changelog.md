@@ -14,7 +14,7 @@ A lot of changes to match https://www.rfc-editor.org/rfc/rfc9110.html, that main
 This has lead to a performance increase of on average around ~25% on the benchmarks.
 
 More valid expressions will now produce ranges. Unsatisfiable ranges will no longer cause an error if there are also 
-satisfiable ranges. Generally, the rule is: If there is at least one satisfiable range it's not an error. 
+satisfiable ranges. Generally, the rule is: If there is at least one satisfiable, valid range it's not an error. 
 Satisfiable ranges are filtered if they cannot properly index the file at the given validation length
 (Only applies to an empty file).
 
@@ -26,7 +26,6 @@ That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0
 returned `Err(FileSuffixOutOfBounds)`.
 - Removed the `Empty` error kind
 - `parse_range_header` with `bytes=-0` will now succeed, but `validate` will fail instead.
-- `bytes=` now returns `BadStartOfRange`
 - Error enum collapsed, range errors such as `ZeroSuffix`, `BadStartOfRange`, etc. are now `BadRange`
 
 ### Fixed

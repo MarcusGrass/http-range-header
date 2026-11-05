@@ -109,7 +109,7 @@ const UNIT_SEP: &str = "bytes=";
 /// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
 /// will become two syntactically correct ranges, but `validate` will return ann `Err`.
 ///
-/// This is an opinionated implementation, [the spec](https://datatracker.ietf.org/doc/html/rfc7233)
+/// This is an opinionated implementation, [the spec](https://www.rfc-editor.org/rfc/rfc9110.html)
 /// allows a server to determine its implementation of overlapping ranges, this api currently does not allow it.
 ///
 /// # Example multipart-range fails `validate` because of an overlap
@@ -130,17 +130,12 @@ pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
     const COMMA: char = ',';
-    let indicated_range = match range_header_value.get(..UNIT_SEP.len()) {
-        Some(r) => {
-            if !r.eq_ignore_ascii_case(UNIT_SEP) {
+    let indicated_range = match range_header_value.split_at_checked(UNIT_SEP.len()) {
+        Some((sep, rest)) => {
+            if !sep.eq_ignore_ascii_case(UNIT_SEP) {
                 return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
             }
-            match range_header_value.get(UNIT_SEP.len()..) {
-                Some(r) => r,
-                None => {
-                    return Err(RangeUnsatisfiableError::BadRange);
-                }
-            }
+            rest
         }
         None => {
             return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
@@ -231,9 +226,8 @@ fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfia
                 ));
             }
         }
-        return Err(RangeUnsatisfiableError::BadRange);
     }
-    Err(RangeUnsatisfiableError::UnexpectedNumberOfDashes)
+    Err(RangeUnsatisfiableError::BadRange)
 }
 
 fn strict_parse_u64(s: &str) -> Option<u64> {
@@ -244,6 +238,8 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
             Err(e) if e.kind() == &IntErrorKind::PosOverflow => {
                 // We're relying on the file not actually being larger than u64::MAX
                 // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
+                // This does mean that a reversed range will be hidden, though it will still be a
+                // `BadRange` error so this is just pedantics
                 Some(u64::MAX)
             }
             Err(_) => None,
@@ -265,7 +261,7 @@ impl ParsedRanges {
     /// Validates a parsed range for a given file-size in bytes.
     /// Can return an empty vector if no ranges are usable.
     /// # Errors
-    /// If all ranges are unsatisfiable
+    /// If all ranges are unsatisfiable or invalid
     pub fn validate(
         &self,
         file_size_bytes: u64,
@@ -313,11 +309,8 @@ impl ParsedRanges {
             validated.push(valid);
         }
 
-        // MSRV preserving
-        #[allow(clippy::single_match)]
-        match (validated.is_empty(), bad_range) {
-            (true, true) => return Err(RangeUnsatisfiableError::BadRange),
-            _ => {}
+        if validated.is_empty() && bad_range {
+            return Err(RangeUnsatisfiableError::BadRange);
         }
         match validate_ranges(validated.as_slice()) {
             RangeValidationResult::Valid => Ok(validated),
@@ -385,7 +378,6 @@ pub enum RangeUnsatisfiableError {
     StartsWithWhitespace,
     DoesNotStartWithToken,
     BadRange,
-    UnexpectedNumberOfDashes,
     TooManyEmptyRanges,
 }
 
@@ -407,12 +399,9 @@ impl Display for RangeUnsatisfiableError {
             RangeUnsatisfiableError::DoesNotStartWithToken => f.write_fmt(format_args!(
                 "RangeUnsatisfiable: Range does not start with token '{UNIT_SEP}'"
             )),
-            RangeUnsatisfiableError::BadRange => {
-                f.write_str("RangeUnsatisfiable: The supplied range is not valid")
-            }
-            RangeUnsatisfiableError::UnexpectedNumberOfDashes => {
-                f.write_str("RangeUnsatisfiable: Unexpected number of dashes")
-            }
+            RangeUnsatisfiableError::BadRange => f.write_str(
+                "RangeUnsatisfiable: The supplied range is either invalid or not satisfiable",
+            ),
             RangeUnsatisfiableError::TooManyEmptyRanges => f.write_fmt(format_args!(
                 "RangeUnsatisfiable: Too many empty ranges (>={})",
                 MAX_EMPTY
@@ -757,22 +746,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_zero_range_last_byte_valid_if_file_size_0() {
-        let input = "bytes=0-";
-        let expect = SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::LastByte);
-        let actual = parse_range_header(input).unwrap().ranges[0];
-        assert_eq!(actual, expect);
-    }
-
-    #[test]
-    fn parse_zero_range_closed_valid_if_file_size_0() {
-        let input = "bytes=0-0";
-        let expect = SyntacticallyCorrectRange::new(StartPosition::Index(0), EndPosition::Index(0));
-        let actual = parse_range_header(input).unwrap().ranges[0];
-        assert_eq!(actual, expect);
-    }
-
-    #[test]
     fn parse_multi_range() {
         let input = "bytes=0-1023, 2015-3000, 4000-4500, 8000-9999";
         let expected_ranges = vec![
@@ -851,6 +824,17 @@ mod tests {
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed_open() {
         let input = "bytes=0-, -1";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
+    }
+
+    #[test]
+    fn parse_start_boundaries() {
+        let parsed = parse_range_header("bytes=9999-").unwrap();
+        assert_eq!(Ok(vec![9999..=9999]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=10000-").unwrap();
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
     }
 
     #[test]
@@ -988,9 +972,19 @@ mod tests {
     #[test]
     fn rejects_long_number() {
         // Guards against an infinite `0`'s string
+        let expect = ParsedRanges {
+            ranges: vec![SyntacticallyCorrectRange {
+                start: StartPosition::Index(0),
+                end: EndPosition::Index(15),
+            }],
+        };
+        assert_eq!(
+            Ok(expect),
+            parse_range_header("bytes=0-000000000000000000000000000015")
+        );
         assert_eq!(
             Err(RangeUnsatisfiableError::BadRange),
-            parse_range_header("bytes=0-00000000000000000000000000000000000000000000000000000000000000000000000015")
+            parse_range_header("bytes=0-0000000000000000000000000000015")
         );
     }
 
@@ -1029,9 +1023,11 @@ mod tests {
         let parsed = parse_range_header("bytes=0-1 ,,,,, 3-4").unwrap();
         assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
 
+        let parsed = parse_range_header("bytes=0-1,,,,,,,,,,,,,,,3-4").unwrap();
+        assert_eq!(Ok(vec![0..=1, 3..=4]), parsed.validate(TEST_FILE_LENGTH));
         assert_eq!(
             Err(RangeUnsatisfiableError::TooManyEmptyRanges),
-            parse_range_header("bytes=0-1,,,,,,,,,,,,,,,,,,3-4")
+            parse_range_header("bytes=0-1,,,,,,,,,,,,,,,,3-4")
         );
     }
 
@@ -1054,6 +1050,15 @@ mod tests {
     fn regression_u64_overflow_clamps_to_end_of_file() {
         let parsed = parse_range_header("bytes=0-18446744073709551615000000000").unwrap();
         assert_eq!(Ok(vec![0..=9999]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed = parse_range_header("bytes=-18446744073709551615000000000").unwrap();
+        assert_eq!(Ok(vec![0..=9999]), parsed.validate(TEST_FILE_LENGTH));
+        let parsed =
+            parse_range_header("bytes=18446744073709551615000000000-18446744073709551615000000000")
+                .unwrap();
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
