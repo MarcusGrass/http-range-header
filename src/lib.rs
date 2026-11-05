@@ -13,7 +13,7 @@ const UNIT_SEP: &str = "bytes=";
 ///
 /// Will only accept byte-ranges, will update when [this spec](https://www.iana.org/assignments/http-parameters/http-parameters.xhtml) changes to allow other units.
 ///
-/// Parses ranges strictly, as in the examples contained in the above specifications.
+/// Parses ranges strictly.
 ///
 /// Ranges such as `bytes=0-15, 16-20, abc` will be rejected immediately.
 ///
@@ -130,12 +130,18 @@ pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
     const COMMA: char = ',';
-    let indicated_range = match range_header_value.split_at_checked(UNIT_SEP.len()) {
-        Some((sep, rest)) => {
-            if !sep.eq_ignore_ascii_case(UNIT_SEP) {
+    let indicated_range = match range_header_value.get(..UNIT_SEP.len()) {
+        Some(r) => {
+            if !r.eq_ignore_ascii_case(UNIT_SEP) {
                 return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
             }
-            rest
+            match range_header_value.get(UNIT_SEP.len()..) {
+                Some(r) => r,
+                None => {
+                    // Unreachable, but `split_at_checked` is not possible at `Rust 1.60`
+                    return Err(RangeUnsatisfiableError::BadRange);
+                }
+            }
         }
         None => {
             return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
@@ -235,11 +241,14 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
     if !s.starts_with('+') && s.len() <= MAX_DIGITS {
         return match s.parse::<u64>() {
             Ok(o) => Some(o),
-            Err(e) if e.kind() == &IntErrorKind::PosOverflow => {
+            Err(e)
+                if e.kind() == &IntErrorKind::PosOverflow
+                    && s.chars().all(|ch| ch.is_ascii_digit()) =>
+            {
                 // We're relying on the file not actually being larger than u64::MAX
                 // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
                 // This does mean that a reversed range will be hidden, though it will still be a
-                // `BadRange` error so this is just pedantics
+                // `BadRange` error if it's the only range, so this is just pedantics
                 Some(u64::MAX)
             }
             Err(_) => None,
@@ -895,7 +904,7 @@ mod tests {
 
     #[test]
     fn zero_length_file_will_not_give_an_error_if_any_range_is_satisfiable() {
-        // https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2-10
+        // https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2-12
         let parsed = parse_range_header("bytes=0-0,-1").unwrap();
         assert_eq!(Ok(vec![]), parsed.validate(0));
         let parsed = parse_range_header("bytes=1-,-1").unwrap();
@@ -1058,6 +1067,54 @@ mod tests {
         assert_eq!(
             Err(RangeUnsatisfiableError::BadRange),
             parsed.validate(TEST_FILE_LENGTH)
+        );
+    }
+
+    #[test]
+    fn regression_u64_parsing_allows_garbage() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=0-99999999999999999999abc")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=0-99999999999999999999-5")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=0-99999999999999999999 5")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=-99999999999999999999abc")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=99999999999999999999abc-,0-1")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::BadRange),
+            parse_range_header("bytes=0-18446744073709551615x")
+        );
+    }
+
+    #[test]
+    fn regression_char_boundary_check() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::DoesNotStartWithToken),
+            parse_range_header("byteé=0-1")
+        );
+    }
+
+    #[test]
+    fn spec_contradiction() {
+        // The spec gives this as an example:
+        // <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2-9.3.1>
+        // But in the definition <https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2-1>
+        // it does not define optional leading whitespace.
+        assert_eq!(
+            Err(RangeUnsatisfiableError::StartsWithWhitespace),
+            parse_range_header("bytes= 0-999, 4500-5499, -1000")
         );
     }
 

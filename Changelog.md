@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [TBD] - Release date
 
 A lot of changes to match https://www.rfc-editor.org/rfc/rfc9110.html, that mainly means relaxing strictness.
-This has lead to a performance increase of on average around ~25% on the benchmarks.
+This has led to a performance increase of on average around ~25% on the benchmarks.
 
 More valid expressions will now produce ranges. Unsatisfiable ranges will no longer cause an error if there are also 
-satisfiable ranges. Generally, the rule is: If there is at least one satisfiable, valid range it's not an error. 
+satisfiable ranges. Generally, the rule is: If there is at least one satisfiable, valid range and no invalid ones 
+it's not an error . 
 Satisfiable ranges are filtered if they cannot properly index the file at the given validation length
 (Only applies to an empty file).
 
@@ -27,6 +28,8 @@ returned `Err(FileSuffixOutOfBounds)`.
 - Removed the `Empty` error kind
 - `parse_range_header` with `bytes=-0` will now succeed, but `validate` will fail instead.
 - Error enum collapsed, range errors such as `ZeroSuffix`, `BadStartOfRange`, etc. are now `BadRange`
+- clamps values above u64::MAX
+- at most 30 digits per range value
 
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.

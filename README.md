@@ -17,7 +17,7 @@ Secondary goals are:
 * Information on why the header was rejected
 
 The parser is strict. Any range where all parts are not syntactically correct is rejected.
-Invalid ranges produces an error.
+Invalid ranges produce an error.
 
 ## Dev release checklist
 
