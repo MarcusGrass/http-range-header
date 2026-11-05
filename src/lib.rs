@@ -197,7 +197,7 @@ fn trim(s: &str) -> Option<&str> {
     {
         None
     } else {
-        Some(s.trim())
+        Some(trimmed)
     }
 }
 
