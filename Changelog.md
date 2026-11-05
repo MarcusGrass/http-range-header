@@ -30,6 +30,7 @@ returned `Err(FileSuffixOutOfBounds)`.
 - Error enum collapsed, range errors such as `ZeroSuffix`, `BadStartOfRange`, etc. are now `BadRange`
 - clamps values above u64::MAX
 - at most 30 digits per range value
+- two ranges may now overlap, but no more than two <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-6>
 
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.

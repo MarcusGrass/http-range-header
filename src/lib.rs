@@ -110,9 +110,10 @@ const UNIT_SEP: &str = "bytes=";
 /// will become two syntactically correct ranges, but `validate` will return ann `Err`.
 ///
 /// This is an opinionated implementation, [the spec](https://www.rfc-editor.org/rfc/rfc9110.html)
-/// allows a server to determine its implementation of overlapping ranges, this api currently does not allow it.
+/// allows a server to determine its implementation of more than two overlapping ranges,
+/// this api currently does not allow it. It will accept at most 2 overlapping ranges.
 ///
-/// # Example multipart-range fails `validate` because of an overlap
+/// # Example multipart-range `validate` on a single overlap, but not two
 /// ```
 /// let input = "bytes=0-15, 10-20, 30-50";
 /// let file_size_bytes = 512;
@@ -120,7 +121,14 @@ const UNIT_SEP: &str = "bytes=";
 ///     // Is syntactically correct
 ///     .unwrap();
 /// let validated = parsed_ranges.validate(file_size_bytes);
-/// // Some ranges overlap, all valid ranges get truncated to 1 Err
+/// assert_eq!(Ok(vec![0..=15, 10..=20, 30..=50]), validated);
+/// let input = "bytes=0-15, 10-20, 30-50, 45-";
+/// let file_size_bytes = 512;
+/// let parsed_ranges = http_range_header::parse_range_header(input)
+///     // Is syntactically correct
+///     .unwrap();
+/// let validated = parsed_ranges.validate(file_size_bytes);
+/// // Some ranges overlap, producing an error
 /// assert!(validated.is_err());
 /// ```
 /// # Errors
@@ -248,7 +256,7 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
                 // We're relying on the file not actually being larger than u64::MAX
                 // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
                 // This does mean that a reversed range will be hidden, though it will still be a
-                // `BadRange` error if it's the only range, so this is just pedantics
+                // `BadRange` error if it's the only range, so this is just pedantics.
                 Some(u64::MAX)
             }
             Err(_) => None,
@@ -439,10 +447,15 @@ fn validate_ranges(ranges: &[RangeInclusive<u64>]) -> RangeValidationResult {
         }
         bounds.push((range.start(), range.end()));
     }
+    let mut num_overlapping = 0;
     for i in 0..bounds.len() {
         for j in i + 1..bounds.len() {
             if bounds[i].0 <= bounds[j].1 && bounds[j].0 <= bounds[i].1 {
-                return RangeValidationResult::Overlapping;
+                if num_overlapping == 0 {
+                    num_overlapping += 1;
+                } else {
+                    return RangeValidationResult::Overlapping;
+                }
             }
         }
     }
@@ -801,37 +814,75 @@ mod tests {
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_standard() {
-        let input = "bytes=0-1023, 500-800";
+        let prepared = parse_range_header("bytes=500-700,601-999").unwrap();
+        assert_eq!(
+            Ok(vec![500..=700, 601..=999]),
+            prepared.validate(TEST_FILE_LENGTH)
+        );
+        let prepared = parse_range_header("bytes=0-1023, 500-800").unwrap();
+        assert_eq!(
+            Ok(vec![0..=1023, 500..=800]),
+            prepared.validate(TEST_FILE_LENGTH)
+        );
+        let prepared = parse_range_header("bytes=0-0, 0-15").unwrap();
+        assert_eq!(Ok(vec![0..=0, 0..=15]), prepared.validate(TEST_FILE_LENGTH));
+        let prepared = parse_range_header("bytes=0-20, 20-35").unwrap();
+        assert_eq!(
+            Ok(vec![0..=20, 20..=35]),
+            prepared.validate(TEST_FILE_LENGTH)
+        );
+        let input = "bytes=0-1023, 500-800, 450-650";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
-        let input = "bytes=0-0, 0-15";
+        let input = "bytes=0-1023, 500-800, 1000-1001";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
-        let input = "bytes=0-20, 20-35";
+        let input = "bytes=0-1023, 500-800, 1000-";
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
+        let input = "bytes=0-, 0-0, 0-15";
+        assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
+        let input = "bytes=0-20, 20-35, 35-";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_open() {
-        let input = "bytes=0-, 5000-6000";
+        let input = "bytes=0-, 1-, 5000-6000";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
+        let parsed = parse_range_header("bytes=0-, 5000-6000").unwrap();
+        assert_eq!(
+            Ok(vec![0..=TEST_FILE_LENGTH - 1, 5000..=6000]),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed() {
-        let input = "bytes=8000-9000, -1001";
+        let parsed = parse_range_header("bytes=8000-9000, -1001").unwrap();
+        assert_eq!(
+            Ok(vec![8000..=9000, 8999..=TEST_FILE_LENGTH - 1]),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
+        let parsed = parse_range_header("bytes=8000-9000, -1000").unwrap();
+        assert_eq!(
+            Ok(vec![8000..=9000, 9000..=TEST_FILE_LENGTH - 1]),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
+        let input = "bytes=8000-9000, -1001, -500";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
-        let input = "bytes=8000-9000, -1000";
+        let input = "bytes=8000-9000, -1000, -400";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
-        // This doesn't overlap
-        let input = "bytes=8000-9000, -999";
-        parse_range_header(input)
-            .unwrap()
-            .validate(TEST_FILE_LENGTH)
-            .unwrap();
     }
 
     #[test]
     fn parse_overlapping_multi_range_as_unsatisfiable_suffixed_open() {
-        let input = "bytes=0-, -1";
+        let parsed = parse_range_header("bytes=0-, -1").unwrap();
+        assert_eq!(
+            Ok(vec![
+                0..=TEST_FILE_LENGTH - 1,
+                TEST_FILE_LENGTH - 1..=TEST_FILE_LENGTH - 1
+            ]),
+            parsed.validate(TEST_FILE_LENGTH)
+        );
+        let input = "bytes=0-, 5-6, -1";
         assert_validation_err(input, RangeUnsatisfiableError::OverlappingRanges);
     }
 
@@ -852,6 +903,7 @@ mod tests {
         assert_validation_err(input, RangeUnsatisfiableError::RangeReversed);
     }
 
+    #[track_caller]
     fn assert_validation_err(input: &str, err: RangeUnsatisfiableError) {
         let parsed = parse_range_header(input)
             .unwrap()
