@@ -23,14 +23,14 @@ const UNIT_SEP: &str = "bytes=";
 /// Allows a maximum of `100` ranges per request to limit DoS-risk, if more ranges are desired
 /// use [`parse_range_header_with_max_ranges`].
 ///
-/// # Example no trailing or leading whitespaces
+/// # Example no trailing whitespace
 /// ```
 /// // Ok
 /// assert!(http_range_header::parse_range_header("bytes=0-15").is_ok());
 /// // Not allowed
 /// assert!(http_range_header::parse_range_header("bytes=0-15 ").is_err());
-/// // Also not allowed
-/// assert!(http_range_header::parse_range_header("bytes= 0-15").is_err());
+/// // Leading is allowed
+/// assert!(http_range_header::parse_range_header("bytes= 0-15").is_ok());
 /// ```
 ///
 /// # Example No leading whitespaces except in the case of separating multipart ranges
@@ -172,10 +172,6 @@ pub fn parse_range_header_with_max_ranges(
             return Err(RangeUnsatisfiableError::DoesNotStartWithToken);
         }
     };
-
-    if indicated_range.starts_with(char::is_whitespace) {
-        return Err(RangeUnsatisfiableError::StartsWithWhitespace);
-    }
     let mut last_err = None;
     let mut num_empty = 0;
     let mut ranges = Vec::new();
@@ -412,7 +408,6 @@ pub enum RangeUnsatisfiableError {
     OverlappingRanges,
     RangeReversed,
     IllegalWhitespace,
-    StartsWithWhitespace,
     DoesNotStartWithToken,
     BadRange,
     TooManyEmptyRanges,
@@ -430,9 +425,6 @@ impl Display for RangeUnsatisfiableError {
             }
             RangeUnsatisfiableError::IllegalWhitespace => {
                 f.write_str("RangeUnsatisfiable: Illegal whitespaces in range")
-            }
-            RangeUnsatisfiableError::StartsWithWhitespace => {
-                f.write_str("RangeUnsatisfiable: Range starts with whitespace")
             }
             RangeUnsatisfiableError::DoesNotStartWithToken => f.write_fmt(format_args!(
                 "RangeUnsatisfiable: Range does not start with token '{UNIT_SEP}'"
@@ -662,11 +654,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_range_starting_with_whitespace_as_invalid() {
+    fn parse_range_starting_with_whitespace_is_valid() {
         let input = "bytes= 0-15";
         let parsed = parse_range_header(input);
         // 0 is unexpected
-        assert_eq!(parsed, Err(RangeUnsatisfiableError::StartsWithWhitespace));
+        assert_eq!(Ok(vec![0..=15]), parsed.unwrap().validate(TEST_FILE_LENGTH));
     }
 
     #[test]
@@ -1047,10 +1039,7 @@ mod tests {
             Err(RangeUnsatisfiableError::IllegalWhitespace),
             parse_range_header("bytes=1-2 ")
         );
-        assert_eq!(
-            Err(RangeUnsatisfiableError::StartsWithWhitespace),
-            parse_range_header("bytes= 1-2")
-        );
+        parse_range_header("bytes= , 0-1,3-4").unwrap();
         parse_range_header("bytes=0-1,3-4").unwrap();
         parse_range_header("bytes=0-1, 3-4").unwrap();
         parse_range_header("bytes=0-1,  3-4").unwrap();
@@ -1212,9 +1201,13 @@ mod tests {
         // <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2-9.3.1>
         // But in the definition <https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2-1>
         // it does not define optional leading whitespace.
+        // Edit: Errata here, this should pass
+        // <https://errata.rfc-editor.org/eid7306/>
         assert_eq!(
-            Err(RangeUnsatisfiableError::StartsWithWhitespace),
+            Ok(vec![0..=999, 4500..=5499, 9000..=9999]),
             parse_range_header("bytes= 0-999, 4500-5499, -1000")
+                .unwrap()
+                .validate(TEST_FILE_LENGTH)
         );
     }
 
