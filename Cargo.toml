@@ -17,8 +17,8 @@ msrv = "1.60.0"
 [dependencies]
 
 [dev-dependencies]
-criterion = "0.5.1"
-rand = "0.10.3"
+criterion = "0.8.2"
+rand = "0.9.5"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
 

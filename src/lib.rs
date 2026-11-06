@@ -1,4 +1,6 @@
 #![warn(clippy::pedantic)]
+// Lints old vs new rust causes issues
+#![allow(unknown_lints)]
 #![allow(clippy::uninlined_format_args, clippy::single_range_in_vec_init)]
 use core::fmt::{Debug, Display, Formatter};
 use core::ops::RangeInclusive;
@@ -224,9 +226,7 @@ const MAX_EMPTY: usize = 15;
 
 fn trim(s: &str) -> Option<&str> {
     let trimmed = s.trim_matches(space_or_tab);
-    if trimmed.starts_with(|ch: char| ch.is_whitespace())
-        || trimmed.ends_with(|ch: char| ch.is_whitespace())
-    {
+    if trimmed.starts_with(char::is_whitespace) || trimmed.ends_with(char::is_whitespace) {
         None
     } else {
         Some(trimmed)
