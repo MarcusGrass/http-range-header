@@ -1,0 +1,5 @@
+[global]
+exclude = []
+
+respect-gitignore = true
+line-length = 140  # Line length
