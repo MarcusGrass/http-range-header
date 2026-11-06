@@ -92,7 +92,7 @@ const UNIT_SEP: &str = "bytes=";
 ///
 /// The range `bytes=0-20` on a file with 15 bytes will be accepted in the first pass as the content size is unknown.
 /// On the second pass (`validate`) it will be truncated to `file_size - 1` as per [the spec](https://httpwg.org/specs/rfc9110.html#rfc.section.14.1.2).
-/// # Example range truncates in `validate` because it exceedes
+/// # Example range truncates in `validate` because it exceeds
 /// ```
 /// let input = "bytes=0-20";
 /// let file_size_bytes = 15;
@@ -130,7 +130,7 @@ const UNIT_SEP: &str = "bytes=";
 /// ```
 /// # Errors
 /// Will return an error if the `range_header_value` cannot be strictly parsed into a range
-/// per the http spec.
+/// per the http spec, or the header's shape is not tolerated.
 #[allow(clippy::missing_panics_doc)]
 pub fn parse_range_header(
     range_header_value: &str,
@@ -249,7 +249,7 @@ fn space_or_tab(ch: char) -> bool {
     ch == ' ' || ch == '\t'
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SyntacticallyCorrectRange {
     FromStart(u64),
     FromLast(u64),
@@ -327,6 +327,7 @@ impl ParsedRanges {
 
     /// Validates a parsed range for a given file-size in bytes.
     /// Can return an empty vector if no ranges are usable (only possible on `file_size_bytes=0`).
+    /// A spec-compliant realistic way of responding in that case is a `200` with an empty body.
     /// # Errors
     /// If all ranges are unsatisfiable or the ranges are intolerable
     pub fn validate(

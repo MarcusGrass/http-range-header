@@ -32,7 +32,6 @@ internals.
 - Validation on file with zero length will not return unindexable ranges, but accept the supplied input as valid.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
 returned `Err(FileSuffixOutOfBounds)`.
-- Removed the `Empty` error kind
 - `parse_range_header` with `bytes=-0` will now succeed, but `validate` will fail instead.
 - Error enum changed now groups errors into:
 * `RangeUnsatisfiableError::Invalid` when a range is rejected because it doesn't make sense

@@ -1,6 +1,6 @@
 # Range header parsing
 
-[![Latest workflow](https://github.com/MarcusGrass/parse-range-headers/workflows/check_commit/badge.svg)](https://github.com/MarcusGrass/parse-range-headers/actions)
+[![Latest workflow](https://github.com/MarcusGrass/parse-range-headers/workflows/CI/badge.svg)](https://github.com/MarcusGrass/parse-range-headers/actions)
 [![CratesIo](https://shields.io/crates/v/http-range-header)](https://crates.io/crates/http-range-header)
 
 The main goals of this parser is:
@@ -10,7 +10,7 @@ The main goals of this parser is:
 * Accuracy - parses headers strictly
 * Security - Never panics, ensured by fuzzing
 * Stability
-* No dependecies
+* No dependencies
 
 Secondary goals are:
 * Speed
@@ -22,7 +22,7 @@ Invalid ranges produce an error.
 ## Known spec divergence/vagueness
 
 1. Huge reversed ranges will not be invalidated
-A range start/end that's bigger than u64::MAX will be clamped u64::MAX (if below 30 digits) as the spec states that 
+A range start/end that's bigger than u64::MAX will be clamped u64::MAX (if not above 30 digits) as the spec states that 
 larger-than-file means to the end of the file. Since no comparison can be made between start/end u64::MAX values
 there is no way of telling if the range is reversed and invalidating the entire spec.
 The result is that either: 1. The range is rejected anyway, if it's a single range, or 2. The range is ignored
@@ -34,7 +34,7 @@ A client that unnecessarily pads values with multiple leading zeroes are seen as
 2. At most one overlapping pair. This is a spec-interpretation, it's optional to restrict it this way for the 
 recipient, spec gray-area. The spec could mean more than two ranges overlap the same given byte, it could also 
 say that more than two ranges overlap in total. E.g. the difference between `0-5,3-7,6-10` and `0-7,3-7,6-10`, 
-in this implementation, both alternatives are rejected, but the spec could be interpreted as only the first being
+in this implementation, both alternatives are rejected, but the spec could be interpreted as only the second being
 rejectable.
 
 ## Dev release checklist
