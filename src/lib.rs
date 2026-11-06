@@ -538,6 +538,7 @@ mod tests {
         RangeUnsatisfiableError, StartPosition, SyntacticallyCorrectRange,
     };
     use core::ops::RangeInclusive;
+    use rand::seq::SliceRandom;
     use std::fmt::Write;
     use std::num::NonZeroUsize;
 
@@ -813,6 +814,14 @@ mod tests {
     }
 
     #[test]
+    fn empty_file_quirks() {
+        let parsed = parse_range_header("bytes=-0").unwrap();
+        assert_eq!(parsed.validate(0), Err(RangeUnsatisfiableError::BadRange));
+        let parsed = parse_range_header("bytes=-0,-1").unwrap();
+        assert_eq!(parsed.validate(0), Ok(vec![]));
+    }
+
+    #[test]
     fn parse_multi_range() {
         let input = "bytes=0-1023, 2015-3000, 4000-4500, 8000-9999";
         let expected_ranges = vec![
@@ -968,6 +977,17 @@ mod tests {
     fn never_panics(input: String) -> quickcheck::TestResult {
         if let Ok(passed_first_pass) = parse_range_header(&input) {
             let _v = passed_first_pass.validate(u64::MAX);
+            quickcheck::TestResult::passed()
+        } else {
+            quickcheck::TestResult::passed()
+        }
+    }
+
+    #[quickcheck_macros::quickcheck]
+    #[allow(clippy::needless_pass_by_value)]
+    fn never_panics_empty_validate(input: String) -> quickcheck::TestResult {
+        if let Ok(passed_first_pass) = parse_range_header(&input) {
+            let _v = passed_first_pass.validate(0);
             quickcheck::TestResult::passed()
         } else {
             quickcheck::TestResult::passed()
@@ -1199,7 +1219,7 @@ mod tests {
     fn regression_char_boundary_check() {
         assert_eq!(
             Err(RangeUnsatisfiableError::DoesNotStartWithToken),
-            parse_range_header("byteé=0-1")
+            parse_range_header("bytesé=0-1")
         );
     }
 
@@ -1223,13 +1243,24 @@ mod tests {
     fn default_100_ranges() {
         let mut spec = "bytes=".to_string();
         let cases = 200;
+        for i in (0..cases).step_by(2) {
+            let start = i;
+            let end = i + 1;
+            spec.write_fmt(format_args!("{}-{},", start, end)).unwrap();
+        }
+        spec.pop();
+        let parsed = parse_range_header(&spec).unwrap();
+        parsed.validate(TEST_FILE_LENGTH).unwrap();
+        let mut spec = "bytes=".to_string();
+        let cases = 200;
         for i in (0..cases).rev().step_by(2) {
             let start = i;
             let end = i + 1;
             spec.write_fmt(format_args!("{}-{},", start, end)).unwrap();
         }
         spec.pop();
-        assert!(parse_range_header(&spec).is_ok());
+        let parsed = parse_range_header(&spec).unwrap();
+        parsed.validate(TEST_FILE_LENGTH).unwrap();
         let mut spec = "bytes=".to_string();
         let cases = 201;
         for i in (0..cases).rev().step_by(2) {
@@ -1243,6 +1274,27 @@ mod tests {
             Err(RangeUnsatisfiableError::TooManyRanges),
             parse_range_header(&spec)
         );
+    }
+
+    #[test]
+    fn random_ranges_overlap_check() {
+        // These ranges don't overlap, and shouldn't in any order
+        let mut ranges = Vec::with_capacity(100);
+        let cases = 200;
+        for i in (0..cases).rev().step_by(2) {
+            let start = i;
+            let end = i + 1;
+            ranges.push(format!("{}-{},", start, end));
+        }
+        let mut rng = rand::rng();
+        ranges.shuffle(&mut rng);
+        let mut spec = "bytes=".to_string();
+        for val in ranges {
+            spec.push_str(&val);
+        }
+        spec.pop();
+        let parsed = parse_range_header(&spec).unwrap();
+        parsed.validate(TEST_FILE_LENGTH).unwrap();
     }
 
     #[test]
