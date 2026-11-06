@@ -103,9 +103,8 @@ const UNIT_SEP: &str = "bytes=";
 /// assert_eq!(vec![0..=14], validated);
 /// ```
 ///
-/// Range reversal and overlap is also checked in the second pass, the range `bytes=0-20, 5-10`
-/// will become two syntactically correct overlapping ranges. However, `bytes=0-20, 5-10, 12-13`
-/// will be rejected on `validate`.
+/// The range `bytes=0-20, 5-10` will become two syntactically correct overlapping ranges.
+/// However, `bytes=0-20, 5-10, 12-13` will be rejected on `validate`.
 ///
 /// This is an opinionated implementation, [the spec](https://www.rfc-editor.org/rfc/rfc9110.html)
 /// allows a server to determine its implementation of more than two overlapping ranges,
@@ -294,7 +293,7 @@ fn strict_parse_u64(s: &str) -> Option<u64> {
                 // We're relying on the file not actually being larger than u64::MAX
                 // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
                 // This does mean that a reversed range will be hidden, though it will still be a
-                // `BadRange` error if it's the only range, so this is just pedantics.
+                // `Unsatisfiable` error if it's the only range, so this is just pedantics.
                 Some(u64::MAX)
             }
             Err(_) => None,
@@ -316,7 +315,7 @@ impl ParsedRanges {
     /// Validates a parsed range for a given file-size in bytes.
     /// Can return an empty vector if no ranges are usable (only possible on `file_size_bytes=0`).
     /// # Errors
-    /// If all ranges are unsatisfiable or any range breaks spec
+    /// If all ranges are unsatisfiable or the ranges are intolerable
     pub fn validate(
         &self,
         file_size_bytes: u64,

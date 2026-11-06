@@ -22,17 +22,16 @@ Invalid ranges produce an error.
 ## Known spec divergence
 
 1. Huge reversed ranges will not be invalidated
-A range start/end that's bigger than u64::MAX will be clamped u64::MAX as the spec states that 
+A range start/end that's bigger than u64::MAX will be clamped u64::MAX (if below 30 digits) as the spec states that 
 larger-than-file means to the end of the file. Since no comparison can be made between start/end u64::MAX values
 there is no way of telling if the range is reversed and invalidating the entire spec.
 The result is that either: 1. The range is rejected anyway, if it's a single range, or 2. The range is ignored
 if it's part of a multi-range where other ranges are valid. 2 breaks spec. 
 There is of course a way of telling which number is bigger, but manual bigint-counting or pulling in a dependency
 to handle this specific invalid case does not seem worth it.
-2. Numerals over 30 digits are rejected. u64::MAX is the cap, and the only way to go over is to pepper the input
-with leading zeroes. This breaks spec, but a client that unnecessarily pads values with multiple leading zeroes 
-are seen as abusive here.
-3. At most one overlapping pair. This is a spec-interpretation, it's optional to restrict it this way for the 
+Numerals over 30 digits are rejected. 
+A client that unnecessarily pads values with multiple leading zeroes are seen as abusive here.
+2. At most one overlapping pair. This is a spec-interpretation, it's optional to restrict it this way for the 
 recipient, spec gray-area.
 
 ## Dev release checklist
