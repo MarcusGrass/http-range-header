@@ -25,7 +25,7 @@ Satisfiable ranges are filtered if they cannot properly index the file at the gi
 - `parse_range_header_with_max_ranges` that accepts a configurable number of ranges, for when 100 just isn't enough.
 
 ### Changed
-- Validation on file with zero length will correctly reject a starting range, rather than returning an unusable range.
+- Validation on file with zero length will not return unindexable ranges, but accept the supplied input as valid.
 That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0) == Ok(vec![])`, before it 
 returned `Err(FileSuffixOutOfBounds)`.
 - Removed the `Empty` error kind
@@ -37,7 +37,6 @@ returned `Err(FileSuffixOutOfBounds)`.
 - `parse_range_header` will by default reject more than 100 ranges in a single input.
 - units are case-insensitive
 - more whitespacing is allowed
-- values above u64::MAX are clamped
 - empty ranges are sometimes tolerated, up to a limit.
 
 ### Fixed

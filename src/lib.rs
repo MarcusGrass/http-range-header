@@ -35,14 +35,6 @@ const UNIT_SEP: &str = "bytes=";
 /// assert!(http_range_header::parse_range_header("bytes= 0-15").is_ok());
 /// ```
 ///
-/// # Example No leading whitespaces except in the case of separating multipart ranges
-/// ```
-/// // Ok, multipart with a leading whitespace after comma
-/// assert!(http_range_header::parse_range_header("bytes=0-15, 20-30").is_ok());
-/// // Ok multipart without leading whitespace after comma
-/// assert!(http_range_header::parse_range_header("bytes=0-15,20-30").is_ok());
-/// ```
-///
 /// # Example No negative values, no plus-sign
 /// ```
 /// // No negatives
@@ -144,9 +136,16 @@ const UNIT_SEP: &str = "bytes=";
 pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
+    // Const unwrap not available in 1.60.0
+    const NZ_100: NonZeroUsize = match NonZeroUsize::new(100) {
+        None => {
+            unreachable!();
+        }
+        Some(nz) => nz,
+    };
     // Picked somewhat arbitrarily, on my bench machine this comes in at sub 2 micros.
     // A value that should be async-safe based on: <https://ryhl.io/blog/async-what-is-blocking/>
-    parse_range_header_with_max_ranges(range_header_value, NonZeroUsize::new(100).unwrap())
+    parse_range_header_with_max_ranges(range_header_value, NZ_100)
 }
 
 /// Like [`parse_range_header`] with a configurable maximum amount of acceptable ranges
@@ -179,23 +178,25 @@ pub fn parse_range_header_with_max_ranges(
     let mut num_empty = 0;
     let mut ranges = Vec::new();
     for range in indicated_range.split(COMMA) {
+        if num_empty >= MAX_EMPTY {
+            return Err(RangeUnsatisfiableError::TooManyEmptyRanges);
+        }
         let val = if let Some(trimmed) = trim(range) {
             if trimmed.is_empty() {
                 num_empty += 1;
-                if num_empty >= MAX_EMPTY {
-                    return Err(RangeUnsatisfiableError::TooManyEmptyRanges);
-                }
                 continue;
             }
             match parse_inner(trimmed) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     last_err = Some(e);
+                    num_empty += 1;
                     continue;
                 }
             }
         } else {
             last_err = Some(RangeUnsatisfiableError::IllegalWhitespace);
+            num_empty += 1;
             continue;
         };
         ranges.push(val);
@@ -299,7 +300,7 @@ impl ParsedRanges {
     }
 
     /// Validates a parsed range for a given file-size in bytes.
-    /// Can return an empty vector if no ranges are usable.
+    /// Can return an empty vector if no ranges are usable (only possible on `file_size_bytes=0`).
     /// # Errors
     /// If all ranges are unsatisfiable or any range breaks spec
     pub fn validate(
@@ -411,6 +412,7 @@ impl ParsedRanges {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RangeUnsatisfiableError {
     OverlappingRanges,
     RangeReversed,
@@ -671,7 +673,6 @@ mod tests {
     fn parse_range_token_starting_with_whitespace_as_invalid() {
         let input = " bytes=0-15";
         let parsed = parse_range_header(input);
-        // 0 is unexpected
         assert_eq!(parsed, Err(RangeUnsatisfiableError::DoesNotStartWithToken));
     }
 
@@ -679,7 +680,6 @@ mod tests {
     fn parse_range_strict_parse_numerical() {
         let input = "bytes=+0-15";
         let parsed = parse_range_header(input);
-        // 0 is unexpected
         assert_eq!(parsed, Err(RangeUnsatisfiableError::BadRange));
     }
 

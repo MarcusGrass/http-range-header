@@ -7,7 +7,7 @@ on:
   pull_request: {}
 
 jobs:
-  check:
+  build_check_1_60_0:
     # Want to run this on aarch64 but https://github.com/actions/runner-images/issues/5631
     runs-on: ubuntu-latest
     steps:
@@ -15,6 +15,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.60.0
+          targets: x86_64-unknown-linux-gnu
+          components: clippy,rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Check clippy
+        run: cargo clippy
+  check_stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
           targets: x86_64-unknown-linux-gnu
           components: clippy,rustfmt
       - name: Check formatting
