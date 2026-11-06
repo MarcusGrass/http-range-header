@@ -21,7 +21,6 @@ Satisfiable ranges are filtered if they cannot properly index the file at the gi
 
 ### Added
 
-- [BREAKING] new error kinds and removed error kinds on `RangeUnsatisfiableError`
 - `parse_range_header_with_max_ranges` that accepts a configurable number of ranges, for when 100 just isn't enough.
 
 ### Changed
@@ -30,7 +29,10 @@ That specifically means that `parse_range_header("bytes=-1").unwrap().validate(0
 returned `Err(FileSuffixOutOfBounds)`.
 - Removed the `Empty` error kind
 - `parse_range_header` with `bytes=-0` will now succeed, but `validate` will fail instead.
-- Error enum collapsed, range errors such as `ZeroSuffix`, `BadStartOfRange`, etc. are now `BadRange`
+- Error enum changed now groups errors into:
+* `RangeUnsatisfiableError::Invalid` when a range is rejected because it doesn't make sense
+* `RangeUnsatisfiableError::Rejected` when a range is rejected because of tolerance (too many ranges, overlapping, empty ranges, etc.)
+* `RangeUnsatisfiableError::Unsatisfiable` when a range is syntactically valid but cannot be satisfied against a given file size
 - clamps values above u64::MAX
 - at most 30 digits per range value
 - two ranges may now overlap, but no more than two <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-6>
@@ -38,6 +40,8 @@ returned `Err(FileSuffixOutOfBounds)`.
 - units are case-insensitive
 - more whitespacing is allowed
 - empty ranges are sometimes tolerated, up to a limit.
+- internal range representation changed, and are no longer public
+- reversed ranges are now rejected by `parse_range_header` instead of `validate`
 
 ### Fixed
 - A suffix range longer than the file (`bytes=-N` with N larger than the file size) now selects the whole file instead of being unsatisfiable, as specified by RFC 9110 14.1.2.

@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main};
-use http_range_header::RangeUnsatisfiableError;
+use http_range_header::{RangeInvalid, RangeUnsatisfiableError};
 use std::fmt::Write;
 use std::hint::black_box;
 
@@ -35,7 +35,9 @@ pub fn bench(c: &mut criterion::Criterion) {
     c.bench_function("Bad multipart range", |b| {
         b.iter(|| {
             assert_eq!(
-                Err(RangeUnsatisfiableError::IllegalWhitespace),
+                Err(RangeUnsatisfiableError::Invalid(
+                    RangeInvalid::IllegalWhitespace
+                )),
                 http_range_header::parse_range_header(black_box("bytes=0-19, -0 "))
             );
         })
