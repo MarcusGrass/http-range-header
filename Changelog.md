@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 ## [TBD] - Release date
 
+## [1.0.0] - 2026-11-06
+
 A lot of changes to match <https://www.rfc-editor.org/rfc/rfc9110.html>, that mainly means relaxing strictness.
 This has led to a performance increase of on average around ~25% on the benchmarks.
 
