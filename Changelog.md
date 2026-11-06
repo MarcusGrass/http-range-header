@@ -19,9 +19,14 @@ it's not an error .
 Satisfiable ranges are filtered if they cannot properly index the file at the given validation length
 (Only applies to an empty file).
 
+Hides the internal ranges so that assumptions about validity can't be invalidated but offers functions to view/take 
+internals.
+
 ### Added
 
 - `parse_range_header_with_max_ranges` that accepts a configurable number of ranges, for when 100 just isn't enough.
+- [`ParsedRanges::len`] which gives the number of ranges
+- [`ParsedRanges::into_ranges`] which destroys the struct, yielding the ranges https://github.com/MarcusGrass/http-range-header/issues/9
 
 ### Changed
 - Validation on file with zero length will not return unindexable ranges, but accept the supplied input as valid.

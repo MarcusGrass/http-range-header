@@ -250,7 +250,7 @@ fn space_or_tab(ch: char) -> bool {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum SyntacticallyCorrectRange {
+pub enum SyntacticallyCorrectRange {
     FromStart(u64),
     FromLast(u64),
     // Guaranteed 0 <= 1
@@ -261,45 +261,47 @@ enum SyntacticallyCorrectRange {
 fn parse_inner(range: &str) -> Result<SyntacticallyCorrectRange, RangeUnsatisfiableError> {
     if let Some((start, end)) = range.split_once('-') {
         if start.is_empty() {
-            if let Some(end) = strict_parse_u64(end) {
-                return Ok(SyntacticallyCorrectRange::FromLast(end));
-            }
-            return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Unparseable));
+            let end = strict_parse_u64(end)?;
+            return Ok(SyntacticallyCorrectRange::FromLast(end));
         }
-        if let Some(start) = strict_parse_u64(start) {
-            if end.is_empty() {
-                return Ok(SyntacticallyCorrectRange::FromStart(start));
-            }
-            if let Some(end) = strict_parse_u64(end) {
-                if start > end {
-                    return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed));
-                }
-                return Ok(SyntacticallyCorrectRange::Indexed(start, end));
-            }
+        let start = strict_parse_u64(start)?;
+        if end.is_empty() {
+            return Ok(SyntacticallyCorrectRange::FromStart(start));
         }
+        let end = strict_parse_u64(end)?;
+        if start > end {
+            return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed));
+        }
+        return Ok(SyntacticallyCorrectRange::Indexed(start, end));
     }
     Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Unparseable))
 }
 
-fn strict_parse_u64(s: &str) -> Option<u64> {
+fn strict_parse_u64(s: &str) -> Result<u64, RangeUnsatisfiableError> {
     const MAX_DIGITS: usize = 30;
-    if !s.starts_with('+') && s.len() <= MAX_DIGITS {
-        return match s.parse::<u64>() {
-            Ok(o) => Some(o),
-            Err(e)
-                if e.kind() == &IntErrorKind::PosOverflow
-                    && s.chars().all(|ch| ch.is_ascii_digit()) =>
-            {
-                // We're relying on the file not actually being larger than u64::MAX
-                // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
-                // This does mean that a reversed range will be hidden, though it will still be a
-                // `Unsatisfiable` error if it's the only range, so this is just pedantics.
-                Some(u64::MAX)
-            }
-            Err(_) => None,
-        };
+    if s.starts_with('+') {
+        return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Unparseable));
     }
-    None
+    if s.len() > MAX_DIGITS {
+        // We don't actually know if there are only digits in there yet
+        return Err(RangeUnsatisfiableError::Rejected(
+            RangeRejected::TooManyDigits,
+        ));
+    }
+    match s.parse::<u64>() {
+        Ok(o) => Ok(o),
+        Err(e)
+            if e.kind() == &IntErrorKind::PosOverflow
+                && s.chars().all(|ch| ch.is_ascii_digit()) =>
+        {
+            // We're relying on the file not actually being larger than u64::MAX
+            // implicitly treating an overflow as full-file (which is the correct spec-following behavior).
+            // This does mean that a reversed range will be hidden, though it will still be a
+            // `Unsatisfiable` error if it's the only range, so this is just pedantics.
+            Ok(u64::MAX)
+        }
+        Err(_) => Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Unparseable)),
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -310,6 +312,17 @@ pub struct ParsedRanges {
 impl ParsedRanges {
     fn new(ranges: Vec<SyntacticallyCorrectRange>) -> Self {
         ParsedRanges { ranges }
+    }
+
+    #[must_use]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.ranges.len()
+    }
+
+    #[must_use]
+    pub fn into_ranges(self) -> Vec<SyntacticallyCorrectRange> {
+        self.ranges
     }
 
     /// Validates a parsed range for a given file-size in bytes.
@@ -415,7 +428,7 @@ impl ParsedRanges {
 pub enum RangeUnsatisfiableError {
     Invalid(RangeInvalid),
     Rejected(RangeRejected),
-    /// Spec says this SHOULD be a 416 <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2>
+    /// Spec says this SHOULD be a 416 <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-13>
     Unsatisfiable,
 }
 
@@ -426,7 +439,9 @@ pub enum RangeUnsatisfiableError {
 pub enum RangeInvalid {
     Reversed,
     IllegalWhitespace,
-    /// Spec says the value MUST be ignored <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-5>
+    /// This error cannot be disambiguated from certain other malformed starts of ranges.
+    /// Therefore, the only spec-compliant way of handling this error-code is ignoring the range
+    /// <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2-5>
     DoesNotStartWithToken,
     NoNonempty,
     Unparseable,
@@ -440,6 +455,7 @@ pub enum RangeRejected {
     /// Spec says reject with a 416 (if rejecting) <https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.17>
     TooManyOverlapping,
     TooManyUnparseable,
+    TooManyDigits,
     /// Spec says ignore or reject (with a 416) <https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.17>
     TooMany,
 }
@@ -466,6 +482,9 @@ impl Display for RangeUnsatisfiableError {
                     f.write_str("range rejected: too many unparseable ranges")
                 }
                 RangeRejected::TooMany => f.write_str("range rejected: too many ranges"),
+                RangeRejected::TooManyDigits => {
+                    f.write_str("range rejected: too many characters in the range digit-position")
+                }
             },
             RangeUnsatisfiableError::Unsatisfiable => f.write_str("range unsatisfiable"),
         }
@@ -1163,7 +1182,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_long_number() {
+    fn rejects_long_number_even_if_its_not_a_number() {
         // Guards against an infinite `0`'s string
         let expect = ParsedRanges {
             ranges: vec![SyntacticallyCorrectRange::Indexed(0, 15)],
@@ -1173,8 +1192,16 @@ mod tests {
             parse_range_header("bytes=0-000000000000000000000000000015")
         );
         assert_eq!(
-            Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Unparseable)),
+            Err(RangeUnsatisfiableError::Rejected(
+                RangeRejected::TooManyDigits
+            )),
             parse_range_header("bytes=0-0000000000000000000000000000015")
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::Rejected(
+                RangeRejected::TooManyDigits
+            )),
+            parse_range_header("bytes=0-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
         );
     }
 
@@ -1309,7 +1336,7 @@ mod tests {
     fn spec_contradiction() {
         // The spec gives this as an example:
         // <https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2-9.3.1>
-        // But in the definition <https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2-1>
+        // But in the definition <https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1.2-2>
         // it does not define optional leading whitespace.
         // Edit: Errata here, this should pass
         // <https://errata.rfc-editor.org/eid7306/>

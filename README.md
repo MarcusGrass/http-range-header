@@ -19,7 +19,7 @@ Secondary goals are:
 The parser is strict. Any range where all parts are not syntactically correct is rejected.
 Invalid ranges produce an error.
 
-## Known spec divergence
+## Known spec divergence/vagueness
 
 1. Huge reversed ranges will not be invalidated
 A range start/end that's bigger than u64::MAX will be clamped u64::MAX (if below 30 digits) as the spec states that 
@@ -32,7 +32,10 @@ to handle this specific invalid case does not seem worth it.
 Numerals over 30 digits are rejected. 
 A client that unnecessarily pads values with multiple leading zeroes are seen as abusive here.
 2. At most one overlapping pair. This is a spec-interpretation, it's optional to restrict it this way for the 
-recipient, spec gray-area.
+recipient, spec gray-area. The spec could mean more than two ranges overlap the same given byte, it could also 
+say that more than two ranges overlap in total. E.g. the difference between `0-5,3-7,6-10` and `0-7,3-7,6-10`, 
+in this implementation, both alternatives are rejected, but the spec could be interpreted as only the first being
+rejectable.
 
 ## Dev release checklist
 
