@@ -1,29 +1,31 @@
 #![no_main]
 use http_range_header::parse_range_header;
 use libfuzzer_sys::fuzz_target;
-use regex::Regex;
 
-lazy_static::lazy_static! {
-    // Should match most valid ranges
-    static ref STANDARD_RANGE: Regex = Regex::new("^bytes=((\\d+-\\d+,\\s?)|(\\d+-,\\s?)|(-\\d+,\\s?))*((\\d+-\\d+)|(\\d+-)|(-\\d+))+$").unwrap();
+fn pick_file_size(selector: u8, raw: u64) -> u64 {
+    match selector % 4 {
+        0 => 0,
+        1 => raw % 256,
+        2 => u64::MAX - raw % 256,
+        _ => raw,
+    }
 }
 
-fuzz_target!(|data: &[u8]| {
-    if let Ok(s) = std::str::from_utf8(data) {
-        // Discard valid ranges, this test is looking for invalid ranges which should
-        // 1. Either not be parsed, or if it's parsed, not pass validation
-        // 2. Not panic
-        if STANDARD_RANGE.is_match(s) {
-            return;
-        }
-        if let Ok(parsed) = parse_range_header(s) {
-            let v = parsed.validate(u64::MAX);
-            assert!(
-                parsed.validate(u64::MAX).is_err(),
-                "range {:?} accepted as {:?}",
-                s,
-                v
-            );
+fuzz_target!(|input: (u8, u64, &str)| {
+    let (selector, raw_size, header) = input;
+    let file_size = pick_file_size(selector, raw_size);
+    if let Ok(parsed) = parse_range_header(header) {
+        if let Ok(ranges) = parsed.validate(file_size) {
+            for range in ranges {
+                // Should always return a usable range
+                assert!(
+                    range.start() <= range.end() && *range.end() < file_size,
+                    "header {:?} produced unusable range {:?} for a file of {} bytes",
+                    header,
+                    range,
+                    file_size
+                );
+            }
         }
     }
 });

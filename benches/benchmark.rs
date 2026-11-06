@@ -1,5 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main};
-use http_range_header::RangeUnsatisfiableError;
+use criterion::{criterion_group, criterion_main};
+use http_range_header::{RangeInvalid, RangeUnsatisfiableError};
+use std::fmt::Write;
+use std::hint::black_box;
 
 pub fn bench(c: &mut criterion::Criterion) {
     c.bench_function("Standard range", |b| {
@@ -33,10 +35,30 @@ pub fn bench(c: &mut criterion::Criterion) {
     c.bench_function("Bad multipart range", |b| {
         b.iter(|| {
             assert_eq!(
-                Err(RangeUnsatisfiableError::ZeroSuffix),
-                http_range_header::parse_range_header(black_box("bytes=0-19, -0"))
+                Err(RangeUnsatisfiableError::Invalid(
+                    RangeInvalid::IllegalWhitespace
+                )),
+                http_range_header::parse_range_header(black_box("bytes=0-19, -0 "))
             );
         })
+    });
+    let mut spec = "bytes=".to_string();
+    let cases = 200;
+    for i in (0..cases).rev().step_by(2) {
+        let start = i;
+        let end = i + 1;
+        spec.write_fmt(format_args!("{}-{},", start, end)).unwrap();
+    }
+    spec.pop();
+    c.bench_function("many ranges parse validate", |b| {
+        b.iter(|| {
+            let r = http_range_header::parse_range_header(black_box(&spec)).unwrap();
+            assert!(r.validate(black_box(cases)).is_ok())
+        })
+    });
+    let r = http_range_header::parse_range_header(black_box(&spec)).unwrap();
+    c.bench_function("many ranges validate only", |b| {
+        b.iter(|| assert!(r.validate(black_box(cases)).is_ok()))
     });
 }
 criterion_group!(benches, bench);
