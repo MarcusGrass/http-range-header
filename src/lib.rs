@@ -310,7 +310,8 @@ pub struct ParsedRanges {
 }
 
 impl ParsedRanges {
-    fn new(ranges: Vec<SyntacticallyCorrectRange>) -> Self {
+    #[must_use]
+    pub fn new(ranges: Vec<SyntacticallyCorrectRange>) -> Self {
         ParsedRanges { ranges }
     }
 
