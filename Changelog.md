@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 ## [TBD] - Release date
 
+## [1.1.0] - 2026-11-12
+
+### Added
+
+- `ParsedRanges::try_new` which allows late construction of `ParsedRanges`, the function is added
+with fallibility that matches `parse_range_header`'s errors to ensure that `ParsedRanges` constructed this
+way still performs `validate` as expected.
+
 ## [1.0.0] - 2026-11-06
 
 A lot of changes to match <https://www.rfc-editor.org/rfc/rfc9110.html>, that mainly means relaxing strictness.

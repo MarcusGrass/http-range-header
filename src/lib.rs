@@ -131,7 +131,6 @@ const UNIT_SEP: &str = "bytes=";
 /// # Errors
 /// Will return an error if the `range_header_value` cannot be strictly parsed into a range
 /// per the http spec, or the header's shape is not tolerated.
-#[allow(clippy::missing_panics_doc)]
 pub fn parse_range_header(
     range_header_value: &str,
 ) -> Result<ParsedRanges, RangeUnsatisfiableError> {
@@ -310,8 +309,31 @@ pub struct ParsedRanges {
 }
 
 impl ParsedRanges {
-    #[must_use]
-    pub fn new(ranges: Vec<SyntacticallyCorrectRange>) -> Self {
+    /// Try to create a new [`ParsedRanges`]
+    /// # Errors
+    /// If the invariants that [`ParsedRanges`] expect for [`SyntacticallyCorrectRange`]s are not
+    /// upheld. Those are: `ranges` are not empty, and `SyntacticallyCorrectRange::Indexed` is not
+    /// reversed.
+    pub fn try_new(
+        ranges: Vec<SyntacticallyCorrectRange>,
+    ) -> Result<Self, RangeUnsatisfiableError> {
+        if ranges.is_empty() {
+            return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::NoNonempty));
+        }
+        for range in &ranges {
+            match range {
+                SyntacticallyCorrectRange::Indexed(a, b) if a > b => {
+                    return Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed));
+                }
+                SyntacticallyCorrectRange::FromStart(_)
+                | SyntacticallyCorrectRange::FromLast(_)
+                | SyntacticallyCorrectRange::Indexed(_, _) => {}
+            }
+        }
+        Ok(Self { ranges })
+    }
+
+    fn new(ranges: Vec<SyntacticallyCorrectRange>) -> Self {
         ParsedRanges { ranges }
     }
 
@@ -1417,6 +1439,95 @@ mod tests {
             Err(RangeUnsatisfiableError::Rejected(RangeRejected::TooMany)),
             parse_range_header_with_max_ranges("bytes=1-2,2-3", NonZeroUsize::new(1).unwrap())
         );
+    }
+
+    #[test]
+    fn try_new_rejects_empty() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::Invalid(RangeInvalid::NoNonempty)),
+            ParsedRanges::try_new(vec![])
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_reversed() {
+        assert_eq!(
+            Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed)),
+            ParsedRanges::try_new(vec![SyntacticallyCorrectRange::Indexed(10, 5)])
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_reversed_mixed_with_valid() {
+        // `validate` would silently drop the reversed range, it must be rejected up front.
+        assert_eq!(
+            Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed)),
+            ParsedRanges::try_new(vec![
+                SyntacticallyCorrectRange::Indexed(0, 3),
+                SyntacticallyCorrectRange::Indexed(10, 5),
+            ])
+        );
+        assert_eq!(
+            Err(RangeUnsatisfiableError::Invalid(RangeInvalid::Reversed)),
+            ParsedRanges::try_new(vec![
+                SyntacticallyCorrectRange::Indexed(10, 5),
+                SyntacticallyCorrectRange::Indexed(0, 3),
+            ])
+        );
+    }
+
+    #[test]
+    fn try_new_accepts_same_edge_inputs_as_parser() {
+        let cases = [
+            (SyntacticallyCorrectRange::Indexed(5, 5), "bytes=5-5"),
+            (SyntacticallyCorrectRange::FromLast(0), "bytes=-0"),
+            (
+                SyntacticallyCorrectRange::FromLast(u64::MAX),
+                "bytes=-99999999999999999999",
+            ),
+            (
+                SyntacticallyCorrectRange::FromStart(u64::MAX),
+                "bytes=99999999999999999999-",
+            ),
+            (
+                SyntacticallyCorrectRange::Indexed(0, u64::MAX),
+                "bytes=0-99999999999999999999",
+            ),
+            (
+                SyntacticallyCorrectRange::Indexed(u64::MAX, u64::MAX),
+                "bytes=99999999999999999999-99999999999999999999",
+            ),
+        ];
+        for (range, header) in cases {
+            assert_eq!(
+                parse_range_header(header),
+                ParsedRanges::try_new(vec![range]),
+                "header: {}",
+                header
+            );
+        }
+    }
+
+    #[test]
+    fn try_new_matches_parsed() {
+        let headers = [
+            "bytes=0-15",
+            "bytes=-0",
+            "bytes=15-",
+            "bytes=0-15, 10-20, 30-50",
+            "bytes=0-15, 10-20, 30-50, 45-",
+            "bytes=20-30, 0-15, -5",
+            "bytes=0-99999999999999999999",
+        ];
+        for header in headers {
+            let parsed = parse_range_header(header).unwrap();
+            assert_eq!(
+                Ok(parsed.clone()),
+                ParsedRanges::try_new(parsed.into_ranges()),
+                "header: {}",
+                header
+            );
+        }
     }
 
     fn single_range(syntactically_correct: SyntacticallyCorrectRange) -> ParsedRanges {
